@@ -1,0 +1,83 @@
+package templates
+
+import (
+	"time"
+	"github.com/Zachdehooge/web-weather-dashboard/internal/fetcher"
+	"math/rand/v2"
+)
+
+templ WarningsPage(warnings []fetcher.Warning) {
+	<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="UTF-8"/>
+		<title>US Weather Warnings</title>
+		<style>
+			body {
+				font-family: Arial, sans-serif;
+				max-width: 800px;
+				margin: 0 auto;
+				padding: 20px;
+			}
+			.warning {
+				border: 1px solid #ddd;
+				margin-bottom: 15px;
+				padding: 10px;
+				border-radius: 5px;
+			}
+			.warning.severe {
+				background-color: #ffdddd;
+				border-color: #ff0000;
+			}
+			.warning.moderate {
+				background-color: #fff4dd;
+				border-color: #ffa500;
+			}
+			.warning-header {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Active Weather Warnings</h1>
+		<p>Warning Total: { len(warnings) } </p>
+		<p>Last updated: { time.Now().Format("Jan 2, 2006 at 3:04 PM") }</p>
+		if len(warnings) == 0 {
+			<p>No active weather warnings at this time.</p>
+		} else {
+			for _, warning := range warnings {
+				<div class={ "warning", getSeverityClass(warning.Severity) }>
+					<div class="warning-header">
+						<h2>{ warning.Type }</h2>
+						<strong>{ warning.Severity } Severity</strong>
+					</div>
+					<p><strong>Area:</strong> { warning.Area }</p>
+					<p>{ warning.Description }</p>
+					<small>Issued: { warning.Time }</small>
+				</div>
+			}
+		}
+	</body>
+	</html>
+}
+
+func getSeverityClass(severity string) string {
+	switch severity {
+	case "Severe", "Extreme":
+		return "severe"
+	case "Moderate":
+		return "moderate"
+	default:
+		return ""
+	}
+}
+
+func CountWarningTypes(warnings []fetcher.Warning) map[string]int {
+	counts := make(map[string]int)
+	for _, w := range warnings {
+		counts[w.Type]++
+	}
+	return counts
+}
