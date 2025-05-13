@@ -2,6 +2,7 @@
 
 A real-time weather warnings dashboard that displays active weather alerts across the United States. This application fetches, processes, and displays weather warnings in a user-friendly interface with dark mode and auto-refresh capabilities.
 
+![dashboard.png](dashboard.png)
 ## Features
 
 - **Real-time Weather Warnings**: Displays current active weather warnings from the NWS
