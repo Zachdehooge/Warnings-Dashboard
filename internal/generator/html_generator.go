@@ -30,22 +30,29 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              --moderate-bg: #3d2e1a;
              --moderate-border: #b25900;
              --summary-bg: #252525;
+             --header-bg: #2d2d45;
+             --header-border: #444466;
           }
           
           body {
              font-family: Arial, sans-serif;
-             max-width: 800px;
+             max-width: 1200px;
              margin: 0 auto;
              padding: 20px;
              background-color: var(--bg-color);
              color: var(--text-color);
           }
+          .warnings-container {
+             display: grid;
+             grid-template-columns: repeat(2, 1fr);
+             gap: 15px;
+          }
           .warning {
              border: 1px solid var(--card-border);
-             margin-bottom: 15px;
              padding: 10px;
              border-radius: 5px;
              background-color: var(--card-bg);
+             height: 100%;
           }
           .warning.severe {
              background-color: var(--severe-bg);
@@ -54,6 +61,21 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           .warning.moderate {
              background-color: var(--moderate-bg);
              border-color: var(--moderate-border);
+          }
+          .warning.header {
+             background-color: var(--header-bg);
+             border-color: var(--header-border);
+             grid-column: 1 / -1; /* Make headers span full width */
+             margin-top: 15px;
+             margin-bottom: 5px;
+             padding: 2px 10px;
+             border-width: 2px;
+             height: auto;
+          }
+          .warning.header h2 {
+             margin: 5px 0;
+             text-align: center;
+             font-size: 1.2em;
           }
           .warning-header {
              display: flex;
@@ -69,6 +91,32 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           .warning-type {
              margin: 5px 0;
           }
+          .warning-type a {
+             color: var(--text-color);
+             text-decoration: none;
+             transition: color 0.2s;
+          }
+          .warning-type a:hover {
+             color: #add8e6;
+             text-decoration: underline;
+          }
+          .back-to-top {
+             position: fixed;
+             bottom: 20px;
+             right: 20px;
+             background-color: var(--header-bg);
+             color: var(--text-color);
+             padding: 10px 15px;
+             border-radius: 5px;
+             border: 1px solid var(--header-border);
+             cursor: pointer;
+             text-decoration: none;
+             opacity: 0.8;
+             transition: opacity 0.2s;
+          }
+          .back-to-top:hover {
+             opacity: 1;
+          }
           h1, h2, h4 {
              color: var(--text-color);
           }
@@ -77,11 +125,16 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              margin-top: 10px;
              color: #888;
           }
+          @media (max-width: 768px) {
+             .warnings-container {
+                grid-template-columns: 1fr;
+             }
+          }
        </style>
        <script>
           // Display countdown to next refresh
           window.onload = function() {
-              let refreshTime = 30; // 5 minutes in seconds
+              let refreshTime = 30; // 30 seconds
               const countdownElement = document.getElementById('countdown');
               
               setInterval(function() {
@@ -94,6 +147,21 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       countdownElement.textContent = "Refreshing...";
                   }
               }, 1000);
+              
+              // Show/hide back-to-top button based on scroll position
+              const backToTopButton = document.querySelector('.back-to-top');
+              window.addEventListener('scroll', function() {
+                  if (window.scrollY > 300) {
+                      backToTopButton.style.display = 'block';
+                  } else {
+                      backToTopButton.style.display = 'none';
+                  }
+              });
+              
+              // Initially hide the button if at the top
+              if (window.scrollY <= 300) {
+                  backToTopButton.style.display = 'none';
+              }
           }
        </script>
     </head>
@@ -101,10 +169,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        <h1>Active Weather Warnings</h1>
        
        {{ if .WarningTypeCounts }}
-       <div class="warning-types">
+       <div class="warning-types" id="top">
           <h2>Warning Types:</h2>
           {{ range $type, $count := .WarningTypeCounts }}
-             <div class="warning-type">{{ $type }}: {{ $count }}</div>
+             <div class="warning-type"><a href="#{{ $type | urlquery }}">{{ $type }}</a>: {{ $count }}</div>
           {{ end }}
        </div>
        {{ end }}
@@ -116,27 +184,34 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        {{ if eq (len .Warnings) 0 }}
           <p>No active weather warnings at this time.</p>
        {{ else }}
+          <div class="warnings-container">
           {{ range .Warnings }}
-             <div class="warning {{ .SeverityClass }}">
-                <div class="warning-header">
+             {{ if eq .Severity "Header" }}
+                <div class="warning header" id="{{ .Type | urlquery }}">
                    <h2>{{ .Type }}</h2>
-                   <strong>{{ .Severity }} Severity</strong>
                 </div>
-                <p><strong>Area:</strong> {{ .Area }}</p>
-                <p>{{ .Description }}</p>
-                <small>Issued: {{ .Time }}</small>
-             </div>
+             {{ else }}
+                <div class="warning {{ .SeverityClass }}">
+                   <div class="warning-header">
+                      <h2>{{ .Type }}</h2>
+                      <strong>{{ .Severity }} Severity</strong>
+                   </div>
+                   <p><strong>Area:</strong> {{ .Area }}</p>
+                   <p>{{ .Description }}</p>
+                   <small>Issued: {{ .Time }}</small>
+                </div>
+             {{ end }}
           {{ end }}
+          </div>
        {{ end }}
+       
+       <a href="#top" class="back-to-top">↑ Top</a>
     </body>
     </html>
     `)
 	if err != nil {
 		return err
 	}
-
-	// Count warning types
-	warningTypeCounts := countWarningTypes(warnings)
 
 	// Prepare data for template
 	data := struct {
@@ -148,7 +223,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
 		Warnings:          convertWarnings(warnings),
 		LastUpdated:       time.Now().Format("Jan 2, 2006 at 3:04:01 PM"),
 		Counter:           len(warnings),
-		WarningTypeCounts: warningTypeCounts,
+		WarningTypeCounts: countWarningTypes(warnings),
 	}
 
 	// Create a buffer to store the rendered HTML
@@ -168,7 +243,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
 func countWarningTypes(warnings []fetcher.Warning) map[string]int {
 	typeCounts := make(map[string]int)
 	for _, warning := range warnings {
-		typeCounts[warning.Type]++
+		// Don't count our header markers as warnings
+		if warning.Severity != "Header" {
+			typeCounts[warning.Type]++
+		}
 	}
 	return typeCounts
 }
@@ -180,14 +258,65 @@ type TemplateWarning struct {
 }
 
 // convertWarnings transforms fetcher.Warning to TemplateWarning
+// and organizes them by type for grouped display
 func convertWarnings(warnings []fetcher.Warning) []TemplateWarning {
-	templateWarnings := make([]TemplateWarning, len(warnings))
-	for i, w := range warnings {
-		templateWarnings[i] = TemplateWarning{
-			Warning:       w,
-			SeverityClass: getSeverityClass(w.Severity),
+	// Group warnings by type
+	warningsByType := make(map[string][]fetcher.Warning)
+	var warningTypes []string
+
+	for _, warning := range warnings {
+		// If this is a new warning type, add it to our list of types
+		if _, exists := warningsByType[warning.Type]; !exists {
+			warningTypes = append(warningTypes, warning.Type)
+		}
+		warningsByType[warning.Type] = append(warningsByType[warning.Type], warning)
+	}
+
+	// Convert and add type identifier for each warning
+	var templateWarnings []TemplateWarning
+
+	for _, warningType := range warningTypes {
+		typeWarnings := warningsByType[warningType]
+
+		// Sort each type's warnings by severity
+		var severeTypeWarnings, moderateTypeWarnings, otherTypeWarnings []fetcher.Warning
+
+		for _, warning := range typeWarnings {
+			switch warning.Severity {
+			case "Severe", "Extreme":
+				severeTypeWarnings = append(severeTypeWarnings, warning)
+			case "Moderate":
+				moderateTypeWarnings = append(moderateTypeWarnings, warning)
+			default:
+				otherTypeWarnings = append(otherTypeWarnings, warning)
+			}
+		}
+
+		// Add type header marker
+		headerWarning := fetcher.Warning{
+			Type:        warningType,
+			Severity:    "Header", // Special marker for headers
+			Description: "",       // Empty description for headers
+			Area:        "",
+			Time:        "",
+		}
+
+		// Add header first
+		templateWarnings = append(templateWarnings, TemplateWarning{
+			Warning:       headerWarning,
+			SeverityClass: "header",
+		})
+
+		// Then add warnings sorted by severity
+		sortedTypeWarnings := append(severeTypeWarnings, append(moderateTypeWarnings, otherTypeWarnings...)...)
+		for _, w := range sortedTypeWarnings {
+			templateWarnings = append(templateWarnings, TemplateWarning{
+				Warning:       w,
+				SeverityClass: getSeverityClass(w.Severity),
+			})
 		}
 	}
+
 	return templateWarnings
 }
 
@@ -198,6 +327,8 @@ func getSeverityClass(severity string) string {
 		return "severe"
 	case "Moderate":
 		return "moderate"
+	case "Header":
+		return "header"
 	default:
 		return ""
 	}
