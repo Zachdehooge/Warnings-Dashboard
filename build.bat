@@ -6,7 +6,7 @@ templ generate
 
 go build -o weather-warnings.exe ./cmd
 
-start "" "PATH TO WEATHER-WARNINGS FILE" --watch -i 30 -o warnings.html -v 
+start "" ".\weather-warnings.exe" --watch -i 30 -o warnings.html -v 
 
 timeout /t 5 
 
