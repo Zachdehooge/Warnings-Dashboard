@@ -89,6 +89,10 @@ func isFilteredWarning(eventType string) bool {
 	// List of warning types to filter out
 	filteredTypes := []string{
 		"flood",
+		"extreme heat warning",
+		"storm warning",
+		"frost advisory",
+		"freeze warning",
 		"gale warning",
 		"test message",
 		"high wind warning",
