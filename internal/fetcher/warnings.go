@@ -16,6 +16,7 @@ type Warning struct {
 	Area        string `json:"area"`
 	Severity    string `json:"severity"`
 	Time        string `json:"time"`
+	ExpiresTime string `json:"expires_time"` // Added expires time field
 }
 
 // FetchWarnings retrieves weather warnings from the National Weather Service API
@@ -49,6 +50,7 @@ func FetchWarnings() ([]Warning, error) {
 				Description string `json:"description"`
 				Severity    string `json:"severity"`
 				Sent        string `json:"sent"`
+				Expires     string `json:"expires"` // Added expires field
 				Headline    string `json:"headline"`
 				Area        string `json:"areaDesc"`
 			} `json:"properties"`
@@ -75,6 +77,7 @@ func FetchWarnings() ([]Warning, error) {
 			Area:        feature.Properties.Area,
 			Severity:    feature.Properties.Severity,
 			Time:        feature.Properties.Sent,
+			ExpiresTime: feature.Properties.Expires, // Store the expires time
 		})
 	}
 
@@ -88,8 +91,16 @@ func isFilteredWarning(eventType string) bool {
 
 	// ! UNCOMMENT BELOW TO KEEP WINTER STORM WARNINGS
 	/*if strings.Contains(lowercaseEvent, "winter storm") {
-		return false
+	   return false
 	}*/
+
+	if strings.Contains(lowercaseEvent, "severe thunderstorm") {
+		return false
+	}
+
+	if strings.Contains(lowercaseEvent, "tornado") {
+		return false
+	}
 
 	// ! List of warning types to filter out
 	filteredTypes := []string{

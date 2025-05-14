@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"html/template"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/Zachdehooge/warnings-dashboard/internal/fetcher"
@@ -198,7 +199,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                    </div>
                    <p><strong>Area:</strong> {{ .Area }}</p>
                    <p>{{ .Description }}</p>
-                   <small>Issued: {{ .Time }}</small>
+                   <small>Issued: {{ .LocalIssued }}</small><br>
+                   <small>Expires: {{ .LocalExpires }}</small>
                 </div>
              {{ end }}
           {{ end }}
@@ -251,73 +253,139 @@ func countWarningTypes(warnings []fetcher.Warning) map[string]int {
 	return typeCounts
 }
 
+// SeverityRank returns a numeric value for severity to enable sorting
+func getSeverityRank(severity string) int {
+	switch severity {
+	case "Extreme":
+		return 4
+	case "Severe":
+		return 3
+	case "Moderate":
+		return 2
+	default:
+		return 1
+	}
+}
+
 // TemplateWarning is a wrapper for fetcher.Warning with additional methods
 type TemplateWarning struct {
 	fetcher.Warning
 	SeverityClass string
+	SeverityRank  int    // Added for sorting
+	LocalIssued   string // Local time of issue
+	LocalExpires  string // Local time of expiration
 }
 
 // convertWarnings transforms fetcher.Warning to TemplateWarning
-// and organizes them by type for grouped display
+// and sorts all warnings by severity first, then organizes them by type
 func convertWarnings(warnings []fetcher.Warning) []TemplateWarning {
 	// Group warnings by type
-	warningsByType := make(map[string][]fetcher.Warning)
+	warningsByType := make(map[string][]TemplateWarning)
 	var warningTypes []string
 
+	// First convert all warnings to TemplateWarning
 	for _, warning := range warnings {
+		// Format the times to local time - ensure both times are properly converted to local time
+		localIssued := formatToLocalTime(warning.Time)
+		localExpires := formatToLocalTime(warning.ExpiresTime)
+
+		templateWarning := TemplateWarning{
+			Warning:       warning,
+			SeverityClass: getSeverityClass(warning.Severity),
+			SeverityRank:  getSeverityRank(warning.Severity),
+			LocalIssued:   localIssued,
+			LocalExpires:  localExpires,
+		}
+
 		// If this is a new warning type, add it to our list of types
 		if _, exists := warningsByType[warning.Type]; !exists {
 			warningTypes = append(warningTypes, warning.Type)
 		}
-		warningsByType[warning.Type] = append(warningsByType[warning.Type], warning)
+		warningsByType[warning.Type] = append(warningsByType[warning.Type], templateWarning)
 	}
 
-	// Convert and add type identifier for each warning
+	// Sort each type's warnings by severity
+	for warningType := range warningsByType {
+		sort.Slice(warningsByType[warningType], func(i, j int) bool {
+			return warningsByType[warningType][i].SeverityRank > warningsByType[warningType][j].SeverityRank
+		})
+	}
+
+	// Sort warning types by highest severity warning
+	sort.Slice(warningTypes, func(i, j int) bool {
+		// Find the highest severity in each warning type
+		iMaxSeverity := 0
+		for _, w := range warningsByType[warningTypes[i]] {
+			if w.SeverityRank > iMaxSeverity {
+				iMaxSeverity = w.SeverityRank
+			}
+		}
+
+		jMaxSeverity := 0
+		for _, w := range warningsByType[warningTypes[j]] {
+			if w.SeverityRank > jMaxSeverity {
+				jMaxSeverity = w.SeverityRank
+			}
+		}
+
+		// Sort by highest severity (descending)
+		return iMaxSeverity > jMaxSeverity
+	})
+
+	// Build the final ordered list of warnings
 	var templateWarnings []TemplateWarning
 
 	for _, warningType := range warningTypes {
 		typeWarnings := warningsByType[warningType]
 
-		// Sort each type's warnings by severity
-		var severeTypeWarnings, moderateTypeWarnings, otherTypeWarnings []fetcher.Warning
-
-		for _, warning := range typeWarnings {
-			switch warning.Severity {
-			case "Severe", "Extreme":
-				severeTypeWarnings = append(severeTypeWarnings, warning)
-			case "Moderate":
-				moderateTypeWarnings = append(moderateTypeWarnings, warning)
-			default:
-				otherTypeWarnings = append(otherTypeWarnings, warning)
-			}
-		}
-
 		// Add type header marker
-		headerWarning := fetcher.Warning{
-			Type:        warningType,
-			Severity:    "Header", // Special marker for headers
-			Description: "",       // Empty description for headers
-			Area:        "",
-			Time:        "",
+		headerWarning := TemplateWarning{
+			Warning: fetcher.Warning{
+				Type:        warningType,
+				Severity:    "Header", // Special marker for headers
+				Description: "",       // Empty description for headers
+				Area:        "",
+				Time:        "",
+			},
+			SeverityClass: "header",
+			SeverityRank:  0,
+			LocalIssued:   "",
+			LocalExpires:  "",
 		}
 
 		// Add header first
-		templateWarnings = append(templateWarnings, TemplateWarning{
-			Warning:       headerWarning,
-			SeverityClass: "header",
-		})
+		templateWarnings = append(templateWarnings, headerWarning)
 
-		// Then add warnings sorted by severity
-		sortedTypeWarnings := append(severeTypeWarnings, append(moderateTypeWarnings, otherTypeWarnings...)...)
-		for _, w := range sortedTypeWarnings {
-			templateWarnings = append(templateWarnings, TemplateWarning{
-				Warning:       w,
-				SeverityClass: getSeverityClass(w.Severity),
-			})
-		}
+		// Then add warnings (already sorted by severity)
+		templateWarnings = append(templateWarnings, typeWarnings...)
 	}
 
 	return templateWarnings
+}
+
+// formatToLocalTime converts time strings to local time
+func formatToLocalTime(timeStr string) string {
+	// If the time string is empty, return an appropriate message
+	if timeStr == "" {
+		return "Not specified"
+	}
+
+	// Parse the input time string based on the expected format
+	t, err := time.Parse("2006-01-02T15:04:05Z", timeStr)
+	if err != nil {
+		// Try alternative date format that might be used
+		t, err = time.Parse(time.RFC3339, timeStr)
+		if err != nil {
+			// If there's still an error parsing, just return the original string
+			return timeStr
+		}
+	}
+
+	// Convert to local time zone
+	localTime := t.Local()
+
+	// Format the time in a user-friendly way
+	return localTime.Format("Jan 2, 2006 at 3:04 PM MST")
 }
 
 // getSeverityClass determines the CSS class based on severity
