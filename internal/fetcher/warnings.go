@@ -86,13 +86,17 @@ func isFilteredWarning(eventType string) bool {
 	// Convert to lowercase for case-insensitive matching
 	lowercaseEvent := strings.ToLower(eventType)
 
+	// Special case: We want to KEEP winter storm warnings
+	if strings.Contains(lowercaseEvent, "winter storm") {
+		return false
+	}
+
 	// List of warning types to filter out
 	filteredTypes := []string{
+		"storm warning", // Filter general storm warnings
+		"storm watch",   // Filter storm watches
 		"flood",
 		"extreme heat warning",
-		"storm warning",
-		"special weather statement",
-		"winter weather advisory",
 		"frost advisory",
 		"freeze warning",
 		"gale warning",
