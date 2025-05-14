@@ -1,9 +1,13 @@
-del warnings.html
+del warnings.html /F
 
-del weather-warnings.exe
+del weather-warnings.exe /F 
 
 templ generate
 
 go build -o weather-warnings.exe ./cmd
 
-.\weather-warnings.exe --watch -i 30 -o warnings.html -v
+start "" "PATH TO WEATHER-WARNINGS FILE" --watch -i 30 -o warnings.html -v 
+
+timeout /t 5 
+
+start warnings.html
