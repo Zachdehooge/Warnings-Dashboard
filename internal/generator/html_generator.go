@@ -2,6 +2,7 @@ package generator
 
 import (
 	"bytes"
+	"fmt"
 	"html/template"
 	"os"
 	"sort"
@@ -33,6 +34,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              --summary-bg: #252525;
              --header-bg: #2d2d45;
              --header-border: #444466;
+             --countdown-warning: #ff4444;
+             --countdown-caution: #ffaa33;
           }
           
           body {
@@ -45,7 +48,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           }
           .warnings-container {
              display: grid;
-             grid-template-columns: repeat(2, 1fr);
+             grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
              gap: 15px;
           }
           .warning {
@@ -126,6 +129,21 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              margin-top: 10px;
              color: #888;
           }
+          .expiration-time {
+             display: flex;
+             justify-content: space-between;
+             align-items: center;
+             margin-top: 5px;
+          }
+          .expiration-countdown {
+             font-weight: bold;
+          }
+          .expiration-countdown.urgent {
+             color: var(--countdown-warning);
+          }
+          .expiration-countdown.warning {
+             color: var(--countdown-caution);
+          }
           @media (max-width: 768px) {
              .warnings-container {
                 grid-template-columns: 1fr;
@@ -163,6 +181,51 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               if (window.scrollY <= 300) {
                   backToTopButton.style.display = 'none';
               }
+              
+              // Initialize expiration countdowns
+              updateAllExpirationCountdowns();
+              
+              // Update expiration countdowns every second
+              setInterval(updateAllExpirationCountdowns, 1000);
+          }
+          
+          // Function to update all expiration countdowns
+          function updateAllExpirationCountdowns() {
+              const expirationElements = document.querySelectorAll('[data-expires-timestamp]');
+              
+              expirationElements.forEach(function(element) {
+                  const expiresTimestamp = parseInt(element.getAttribute('data-expires-timestamp'));
+                  if (!expiresTimestamp) return;
+                  
+                  const now = Math.floor(Date.now() / 1000);
+                  const timeLeft = expiresTimestamp - now;
+                  
+                  if (timeLeft <= 0) {
+                      element.textContent = "EXPIRED";
+                      element.classList.add("urgent");
+                  } else {
+                      const hours = Math.floor(timeLeft / 3600);
+                      const minutes = Math.floor((timeLeft % 3600) / 60);
+                      const seconds = timeLeft % 60;
+                      
+                      // Format the countdown
+                      let countdownText = "";
+                      if (hours > 0) {
+                          countdownText += hours + "h ";
+                      }
+                      countdownText += minutes + "m " + seconds + "s";
+                      
+                      element.textContent = countdownText;
+                      
+                      // Add warning classes based on time remaining
+                      element.classList.remove("urgent", "warning");
+                      if (timeLeft < 1800) { // Less than 30 minutes
+                          element.classList.add("urgent");
+                      } else if (timeLeft < 7200) { // Less than 2 hours
+                          element.classList.add("warning");
+                      }
+                  }
+              });
           }
        </script>
     </head>
@@ -200,7 +263,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                    <p><strong>Area:</strong> {{ .Area }}</p>
                    <p>{{ .Description }}</p>
                    <small>Issued: {{ .LocalIssued }}</small><br>
-                   <small>Expires: {{ .LocalExpires }}</small>
+                   <div class="expiration-time">
+                      <small>Expires: {{ .LocalExpires }}</small>
+                      <small class="expiration-countdown" data-expires-timestamp="{{ .ExpiresTimestamp }}"></small>
+                   </div>
                 </div>
              {{ end }}
           {{ end }}
@@ -270,10 +336,11 @@ func getSeverityRank(severity string) int {
 // TemplateWarning is a wrapper for fetcher.Warning with additional methods
 type TemplateWarning struct {
 	fetcher.Warning
-	SeverityClass string
-	SeverityRank  int    // Added for sorting
-	LocalIssued   string // Local time of issue
-	LocalExpires  string // Local time of expiration
+	SeverityClass    string
+	SeverityRank     int    // Added for sorting
+	LocalIssued      string // Local time of issue
+	LocalExpires     string // Local time of expiration
+	ExpiresTimestamp string // Unix timestamp for JavaScript countdown
 }
 
 // convertWarnings transforms fetcher.Warning to TemplateWarning
@@ -289,12 +356,16 @@ func convertWarnings(warnings []fetcher.Warning) []TemplateWarning {
 		localIssued := formatToLocalTime(warning.Time)
 		localExpires := formatToLocalTime(warning.ExpiresTime)
 
+		// Get Unix timestamp for expiration countdown
+		expiresTimestamp := getExpiresTimestamp(warning.ExpiresTime)
+
 		templateWarning := TemplateWarning{
-			Warning:       warning,
-			SeverityClass: getSeverityClass(warning.Severity),
-			SeverityRank:  getSeverityRank(warning.Severity),
-			LocalIssued:   localIssued,
-			LocalExpires:  localExpires,
+			Warning:          warning,
+			SeverityClass:    getSeverityClass(warning.Severity),
+			SeverityRank:     getSeverityRank(warning.Severity),
+			LocalIssued:      localIssued,
+			LocalExpires:     localExpires,
+			ExpiresTimestamp: expiresTimestamp,
 		}
 
 		// If this is a new warning type, add it to our list of types
@@ -347,10 +418,11 @@ func convertWarnings(warnings []fetcher.Warning) []TemplateWarning {
 				Area:        "",
 				Time:        "",
 			},
-			SeverityClass: "header",
-			SeverityRank:  0,
-			LocalIssued:   "",
-			LocalExpires:  "",
+			SeverityClass:    "header",
+			SeverityRank:     0,
+			LocalIssued:      "",
+			LocalExpires:     "",
+			ExpiresTimestamp: "",
 		}
 
 		// Add header first
@@ -386,6 +458,27 @@ func formatToLocalTime(timeStr string) string {
 
 	// Format the time in a user-friendly way
 	return localTime.Format("Jan 2, 2006 at 3:04 PM MST")
+}
+
+// getExpiresTimestamp converts expiration time to Unix timestamp for JavaScript countdown
+func getExpiresTimestamp(timeStr string) string {
+	if timeStr == "" {
+		return ""
+	}
+
+	// Parse the input time string based on the expected format
+	t, err := time.Parse("2006-01-02T15:04:05Z", timeStr)
+	if err != nil {
+		// Try alternative date format that might be used
+		t, err = time.Parse(time.RFC3339, timeStr)
+		if err != nil {
+			// If there's an error parsing, return empty string
+			return ""
+		}
+	}
+
+	// Convert to Unix timestamp (seconds since epoch)
+	return fmt.Sprintf("%d", t.Unix())
 }
 
 // getSeverityClass determines the CSS class based on severity
