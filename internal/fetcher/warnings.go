@@ -70,6 +70,10 @@ func FetchWarnings() ([]Warning, error) {
 			continue
 		}
 
+		if isFilteredWords(feature.Properties.Description) {
+			continue
+		}
+
 		warnings = append(warnings, Warning{
 			ID:          feature.Properties.ID,
 			Type:        feature.Properties.Event,
@@ -82,6 +86,22 @@ func FetchWarnings() ([]Warning, error) {
 	}
 
 	return warnings, nil
+}
+
+func isFilteredWords(words string) bool {
+	words = strings.ToLower(words)
+
+	filteredTypes := []string{
+		"fire",
+	}
+
+	for _, filteredType := range filteredTypes {
+		if strings.Contains(words, filteredType) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // isFilteredWarning checks if a warning should be filtered out
