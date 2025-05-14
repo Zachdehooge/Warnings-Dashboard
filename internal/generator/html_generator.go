@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/Zachdehooge/web-weather-dashboard/internal/fetcher"
+	"github.com/Zachdehooge/warnings-dashboard/internal/fetcher"
 )
 
 // GenerateWarningsHTML creates an HTML file with weather warnings
