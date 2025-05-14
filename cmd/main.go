@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/Zachdehooge/web-weather-dashboard/internal/fetcher"
-	"github.com/Zachdehooge/web-weather-dashboard/internal/generator"
+	"github.com/Zachdehooge/warnings-dashboard/internal/fetcher"
+	"github.com/Zachdehooge/warnings-dashboard/internal/generator"
 	"github.com/spf13/cobra"
 )
 
