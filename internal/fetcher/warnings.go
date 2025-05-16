@@ -127,6 +127,7 @@ func isFilteredWarning(eventType string) bool {
 		"storm warning",
 		"special weather statement",
 		"storm watch",
+		"freeze watch",
 		"flood",
 		"winter weather advisory",
 		"extreme heat warning",
