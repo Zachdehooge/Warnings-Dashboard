@@ -2,7 +2,8 @@
 
 A real-time weather warnings dashboard that displays active weather alerts across the United States. This application fetches, processes, and displays weather warnings in a user-friendly interface with dark mode and auto-refresh capabilities. All you need to do is run build.bat!
 
-![dashboard.png](dashboard.png)
+![dashboard1.png](dashboard1.png)
+
 ## Features
 
 - **Real-time Weather Warnings**: Displays current active weather warnings from the NWS
