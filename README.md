@@ -4,6 +4,11 @@ A real-time weather warnings dashboard that displays active weather alerts acros
 
 ![dashboard1.png](dashboard1.png)
 
+## Docker
+- Clone the repo
+- ```docker build -t weather-warnings```
+- ```docker run -p 8080:8080 weather-warnings```
+
 ## Features
 
 - **Real-time Weather Warnings**: Displays current active weather warnings from the NWS
