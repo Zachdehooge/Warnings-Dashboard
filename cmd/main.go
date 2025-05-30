@@ -86,7 +86,7 @@ func runWatchMode(cmd *cobra.Command) {
 	}
 
 	cmd.Println(fmt.Sprintf("Watch mode activated. Updating every %d seconds. Press Ctrl+C to stop.", interval))
-
+	cmd.Println(fmt.Sprintf("Open at http://localhost:8080/warnings.html"))
 	// Create a ticker for periodic updates
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
