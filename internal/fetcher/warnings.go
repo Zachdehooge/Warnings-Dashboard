@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Warning represents a weather warning
+// Warning Represents a weather warning
 type Warning struct {
 	ID          string `json:"id"`
 	Type        string `json:"type"`
