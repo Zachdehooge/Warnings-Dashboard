@@ -1,0 +1,54 @@
+name: Golang CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '>=1.23.0'
+      - name: Build
+        run: |
+          echo "Running build..."
+          go install github.com/a-h/templ/cmd/templ@latest
+          templ generate
+          go build -o weather-warnings.exe ./cmd
+
+  gosec:
+    name: Run Gosec Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install Gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run Gosec (fail only on HIGH severity)
+        run: |
+          gosec -fmt=json -severity=high ./... | tee gosec-report.json
+          # Extract the number of HIGH severity issues
+          HIGH_COUNT=$(jq '[.Issues[] | select(.severity == "HIGH")] | length' gosec-report.json)
+          echo "Found $HIGH_COUNT high severity issues."
+          if [ "$HIGH_COUNT" -gt 0 ]; then
+            echo "High severity issues detected!"
+            exit 1
+          fi
