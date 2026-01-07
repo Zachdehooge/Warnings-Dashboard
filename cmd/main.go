@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Zachdehooge/warnings-dashboard/internal/fetcher"
@@ -33,6 +35,7 @@ from the National Weather Service and generates a static HTML page.`,
 
 			// Watch mode
 			if watchMode {
+				startHTTPServer(cmd)
 				runWatchMode(cmd)
 			}
 		},
@@ -52,19 +55,16 @@ from the National Weather Service and generates a static HTML page.`,
 	}
 }
 
-// generateWarningsHTML creates the initial warnings HTML file
 func generateWarningsHTML(cmd *cobra.Command) error {
 	if verbose {
 		cmd.Println("Fetching active weather warnings...")
 	}
 
-	// Fetch warnings
 	warnings, err := fetcher.FetchWarnings()
 	if err != nil {
 		return fmt.Errorf("failed to fetch warnings: %w", err)
 	}
 
-	// Generate HTML
 	if verbose {
 		cmd.Println(fmt.Sprintf("Generating HTML to %s...", outputFile))
 	}
@@ -78,20 +78,16 @@ func generateWarningsHTML(cmd *cobra.Command) error {
 	return nil
 }
 
-// runWatchMode continuously updates the warnings HTML
 func runWatchMode(cmd *cobra.Command) {
-	// Enforce minimum interval
 	if interval < 30 {
 		interval = 30
 	}
 
 	cmd.Println(fmt.Sprintf("Watch mode activated. Updating every %d seconds. Press Ctrl+C to stop.", interval))
-	cmd.Println(fmt.Sprintf("Open at http://localhost:8080/warnings.html"))
-	// Create a ticker for periodic updates
+
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
 
-	// Handle continuous updates
 	for range ticker.C {
 		err := generateWarningsHTML(cmd)
 		if err != nil {
@@ -100,7 +96,20 @@ func runWatchMode(cmd *cobra.Command) {
 	}
 }
 
-// addListCmd adds a 'list' subcommand to show warning details without generating HTML
+func startHTTPServer(cmd *cobra.Command) {
+	dir := filepath.Dir(outputFile)
+	fs := http.FileServer(http.Dir(dir))
+
+	go func() {
+		addr := ":8085"
+		cmd.Println("Starting HTTP server at http://localhost:8085/")
+		err := http.ListenAndServe(addr, fs)
+		if err != nil {
+			cmd.PrintErrln(fmt.Errorf("failed to start HTTP server: %w", err))
+		}
+	}()
+}
+
 func addListCmd(rootCmd *cobra.Command) {
 	listCmd := &cobra.Command{
 		Use:   "list",

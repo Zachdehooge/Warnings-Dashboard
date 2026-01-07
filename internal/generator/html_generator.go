@@ -358,7 +358,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
 		WarningTypeCounts []TypeCount
 	}{
 		Warnings:          convertWarnings(warnings),
-		LastUpdated:       time.Now().Format("Jan 2, 2006 at 3:04:01 PM"),
+		LastUpdated:       time.Now().UTC().Format("Jan 2, 2006 at 03:04:01 UTC"),
 		Counter:           len(warnings),
 		WarningTypeCounts: sortedWarningTypeCounts(warnings),
 	}

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Warning represents a weather warning
+// Warning Represents a weather warning
 type Warning struct {
 	ID          string `json:"id"`
 	Type        string `json:"type"`
@@ -159,6 +159,11 @@ func isFilteredWarning(eventType string) bool {
 		"beach hazard",
 		"coastal hazard",
 		"coastal erosion",
+		"blizzard warning",
+		"extreme cold watch",
+		"extreme cold warning",
+		"hazardous seas warning",
+		"cold weather advisory",
 	}
 
 	// Check if the event type contains any filtered keywords
