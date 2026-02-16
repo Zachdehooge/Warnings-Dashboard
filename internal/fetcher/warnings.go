@@ -16,10 +16,10 @@ type Warning struct {
 	Area        string      `json:"area"`
 	Severity    string      `json:"severity"`
 	Time        string      `json:"time"`
-	ExpiresTime string      `json:"expires_time"`
+	ExpiresTime string      `json:"expiresTime"`
 	Geometry    interface{} `json:"geometry"`
-	UGC         []string    `json:"ugc"`  // Added for county fallback
-	SAME        []string    `json:"same"` // Added for county fallback
+	UGC         []string    `json:"ugc"`
+	SAME        []string    `json:"same"`
 }
 
 // FetchWarnings retrieves weather warnings from the National Weather Service API

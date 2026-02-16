@@ -60,40 +60,23 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              padding: 20px;
              background-color: var(--bg-color);
              color: var(--text-color);
+             /* Smooth fade-in on page load */
+             animation: fadeIn 0.3s ease-in;
           }
           
-          .tabs {
-             display: flex;
-             gap: 10px;
-             margin-bottom: 20px;
-             border-bottom: 2px solid var(--card-border);
+          @keyframes fadeIn {
+             from { opacity: 0; }
+             to { opacity: 1; }
           }
           
-          .tab {
-             padding: 10px 20px;
-             background-color: var(--card-bg);
-             border: 1px solid var(--card-border);
-             border-bottom: none;
-             border-radius: 5px 5px 0 0;
-             cursor: pointer;
-             transition: background-color 0.2s;
+          /* Prevent flash of white during reload */
+          html {
+             background-color: #121212;
           }
           
-          .tab:hover {
-             background-color: var(--header-bg);
-          }
-          
-          .tab.active {
-             background-color: var(--tab-active-bg);
-             border-color: var(--header-border);
-          }
-          
-          .tab-content {
-             display: none;
-          }
-          
-          .tab-content.active {
-             display: block;
+          .warning-title:hover {
+             text-decoration: underline;
+             color: #add8e6;
           }
           
           #map {
@@ -102,6 +85,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              border: 2px solid var(--card-border);
              border-radius: 5px;
              margin-top: 20px;
+             /* Smooth appearance */
+             opacity: 1;
+             transition: opacity 0.2s ease-in-out;
+          }
+          
+          #map.loading {
+             opacity: 0.7;
           }
           
           .map-legend {
@@ -292,6 +282,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           let map;
           let warningsData = {{ .WarningsJSON }};
           let countyBoundaries = null; // Will store county boundary data
+          let warningLayers = []; // Track all warning layers for cleanup
           
           // Load county boundaries from NWS GeoJSON
           async function loadCountyBoundaries() {
@@ -306,10 +297,20 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               }
           }
           
+          // Clear all warning layers from the map
+          function clearWarningLayers() {
+              warningLayers.forEach(layer => {
+                  if (map.hasLayer(layer)) {
+                      map.removeLayer(layer);
+                  }
+              });
+              warningLayers = [];
+          }
+          
           // Display countdown to next refresh
           window.onload = function() {
-              // Restore the previously active tab FIRST, before any other initialization
-              restoreActiveTab();
+              // Initialize map immediately since it's always visible
+              initMap();
               
               // Set up refresh countdown
               let refreshTime = 30; // 30 seconds
@@ -354,60 +355,48 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               setInterval(updateAllExpirationCountdowns, 1000);
           }
           
-          // Function to switch tabs
-          function switchTab(tabName) {
-              // Hide all tab contents
-              const tabContents = document.querySelectorAll('.tab-content');
-              tabContents.forEach(content => content.classList.remove('active'));
+          // Zoom to a specific warning on the map
+          function zoomToWarning(warningId) {
+              // Scroll to map first
+              document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'center' });
               
-              // Remove active class from all tabs
-              const tabs = document.querySelectorAll('.tab');
-              tabs.forEach(tab => tab.classList.remove('active'));
-              
-              // Show selected tab content
-              document.getElementById(tabName + '-content').classList.add('active');
-              
-              // Add active class to selected tab
-              event.target.classList.add('active');
-              
-              // Save the active tab to localStorage
-              localStorage.setItem('activeTab', tabName);
-              
-              // Initialize map if switching to map tab
-              if (tabName === 'map' && !map) {
-                  initMap();
+              // Find the warning in our data
+              const warning = warningsData.find(w => w.id === warningId);
+              if (!warning) {
+                  console.log('Warning not found:', warningId);
+                  return;
               }
-          }
-          
-          // Restore the previously active tab
-          function restoreActiveTab() {
-              const savedTab = localStorage.getItem('activeTab');
               
-              // If there's a saved tab preference, switch to it
-              if (savedTab && (savedTab === 'list' || savedTab === 'map')) {
-                  // Hide all tab contents
-                  const tabContents = document.querySelectorAll('.tab-content');
-                  tabContents.forEach(content => content.classList.remove('active'));
+              // Find the corresponding polygon layer
+              const layer = warningLayers.find(layer => {
+                  // Check if this layer corresponds to our warning
+                  if (layer._popup && layer._popup._content) {
+                      return layer._popup._content.includes(warning.type) && 
+                             layer._popup._content.includes(warning.area);
+                  }
+                  return false;
+              });
+              
+              if (layer && layer.getBounds) {
+                  // Zoom to the polygon
+                  map.fitBounds(layer.getBounds(), { padding: [50, 50] });
                   
-                  // Remove active class from all tabs
-                  const tabs = document.querySelectorAll('.tab');
-                  tabs.forEach(tab => tab.classList.remove('active'));
-                  
-                  // Show the saved tab content
-                  document.getElementById(savedTab + '-content').classList.add('active');
-                  
-                  // Add active class to the corresponding tab button
-                  const tabButtons = document.querySelectorAll('.tab');
-                  tabButtons.forEach(tab => {
-                      if ((savedTab === 'list' && tab.textContent === 'List View') ||
-                          (savedTab === 'map' && tab.textContent === 'Map View')) {
-                          tab.classList.add('active');
-                      }
-                  });
-                  
-                  // Initialize map if the saved tab is map
-                  if (savedTab === 'map') {
-                      initMap();
+                  // Open the popup after a short delay
+                  setTimeout(function() {
+                      layer.openPopup();
+                  }, 500);
+              } else if (warning.geometry && warning.geometry.coordinates) {
+                  // Fallback: calculate bounds from coordinates
+                  try {
+                      const coords = warning.geometry.type === 'Polygon' 
+                          ? warning.geometry.coordinates[0] 
+                          : warning.geometry.coordinates[0][0];
+                      
+                      const latLngs = coords.map(coord => [coord[1], coord[0]]);
+                      const bounds = L.latLngBounds(latLngs);
+                      map.fitBounds(bounds, { padding: [50, 50] });
+                  } catch (error) {
+                      console.error('Error zooming to warning:', error);
                   }
               }
           }
@@ -417,12 +406,27 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               // Create map centered on continental US
               map = L.map('map').setView([39.8283, -98.5795], 4);
               
+              // Restore saved map position if available
+              const savedMapState = localStorage.getItem('mapState');
+              if (savedMapState) {
+                  try {
+                      const state = JSON.parse(savedMapState);
+                      map.setView([state.lat, state.lng], state.zoom);
+                  } catch (e) {
+                      console.log('Could not restore map state:', e);
+                  }
+              }
+              
               // Add OpenStreetMap tile layer with dark theme
               L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
                   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                   subdomains: 'abcd',
                   maxZoom: 20
               }).addTo(map);
+              
+              // Save map state whenever user moves or zooms
+              map.on('moveend', saveMapState);
+              map.on('zoomend', saveMapState);
               
               // Load county boundaries if not already loaded
               if (!countyBoundaries) {
@@ -433,9 +437,21 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               addWarningsToMap();
           }
           
+          // Save current map state to localStorage
+          function saveMapState() {
+              const center = map.getCenter();
+              const zoom = map.getZoom();
+              const state = {
+                  lat: center.lat,
+                  lng: center.lng,
+                  zoom: zoom
+              };
+              localStorage.setItem('mapState', JSON.stringify(state));
+          }
+          
           // Get color based on warning type
           function getWarningColor(warningType, severity) {
-              const lowerType = warningType.toLowerCase();
+              const lowerType = warningType ? warningType.toLowerCase() : '';
               
               if (lowerType.includes('tornado warning')) {
                   return '#ff69b4'; // Pink for tornado warnings
@@ -465,48 +481,91 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               let skippedCount = 0;
               let countyFallbackCount = 0;
               
-              warningsData.forEach(warning => {
-                  // Skip header entries
-                  if (warning.Severity === 'Header') return;
+              console.log('Total warnings data:', warningsData.length);
+              
+              // Filter out warnings without geometry first
+              const validWarnings = warningsData.filter(warning => {
+                  // Skip header entries or undefined warnings
+                  if (!warning || warning.severity === 'Header') return false;
                   
-                  const color = getWarningColor(warning.Type, warning.Severity);
+                  // Must have geometry or SAME codes for county fallback
+                  return (warning.geometry && warning.geometry.type) || 
+                         (warning.same && warning.same.length > 0 && countyBoundaries);
+              });
+              
+              console.log('Valid warnings to display:', validWarnings.length);
+              
+              // Sort warnings by priority (similar to alerts.js order)
+              const warningOrder = [
+                  'tornado warning',
+                  'severe thunderstorm warning',
+                  'tornado watch',
+                  'severe thunderstorm watch',
+                  'other'
+              ];
+              
+              validWarnings.sort((a, b) => {
+                  const aType = (a.type || '').toLowerCase();
+                  const bType = (b.type || '').toLowerCase();
+                  
+                  let aIndex = warningOrder.length - 1; // default to 'other'
+                  let bIndex = warningOrder.length - 1;
+                  
+                  for (let i = 0; i < warningOrder.length - 1; i++) {
+                      if (aType.includes(warningOrder[i])) aIndex = i;
+                      if (bType.includes(warningOrder[i])) bIndex = i;
+                  }
+                  
+                  if (aIndex !== bIndex) {
+                      return aIndex - bIndex;
+                  }
+                  
+                  // Sort by time if same type
+                  const aTime = new Date(a.time || 0).getTime();
+                  const bTime = new Date(b.time || 0).getTime();
+                  return aTime - bTime;
+              });
+              
+              // Draw warnings
+              validWarnings.forEach(warning => {
+                  const color = getWarningColor(warning.type, warning.severity);
                   
                   try {
-                      // First try to use the actual polygon geometry
-                      if (warning.Geometry && warning.Geometry.type) {
-                          const geometry = warning.Geometry;
+                      // Try to use actual polygon geometry first
+                      if (warning.geometry && warning.geometry.type) {
+                          const geometry = warning.geometry;
                           
-                          // Handle different geometry types
                           if (geometry.type === 'Polygon') {
-                              addPolygonToMap(geometry.coordinates, warning, color);
+                              drawPolygon(geometry.coordinates, warning, color);
                               addedCount++;
                           } else if (geometry.type === 'MultiPolygon') {
                               geometry.coordinates.forEach(polygonCoords => {
-                                  addPolygonToMap(polygonCoords, warning, color);
+                                  drawPolygon(polygonCoords, warning, color);
                               });
                               addedCount++;
                           } else {
-                              console.log('Unknown geometry type:', geometry.type, 'for warning:', warning.Type);
-                              skippedCount++;
+                              console.log('Unknown geometry type:', geometry.type, 'for warning:', warning.type);
+                              // Try county fallback
+                              if (addCountyFallback(warning, color)) {
+                                  countyFallbackCount++;
+                                  addedCount++;
+                              } else {
+                                  skippedCount++;
+                              }
                           }
                       } 
-                      // Fallback to county boundaries if no geometry but we have SAME codes
-                      else if (warning.SAME && warning.SAME.length > 0 && countyBoundaries) {
-                          const added = addCountyFallback(warning, color);
-                          if (added) {
+                      // Fallback to county boundaries if no geometry
+                      else if (warning.same && warning.same.length > 0 && countyBoundaries) {
+                          if (addCountyFallback(warning, color)) {
                               countyFallbackCount++;
                               addedCount++;
                           } else {
-                              console.log('Warning missing geometry and county fallback failed:', warning.Type, warning.Area);
+                              console.log('Warning missing geometry and county fallback failed:', warning.type, warning.area);
                               skippedCount++;
                           }
                       }
-                      else {
-                          console.log('Warning missing geometry:', warning.Type, warning.Area);
-                          skippedCount++;
-                      }
                   } catch (error) {
-                      console.error('Error adding warning to map:', warning.Type, error);
+                      console.error('Error adding warning to map:', warning.type, error);
                       skippedCount++;
                   }
               });
@@ -517,47 +576,61 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               }
           }
           
-          // Add a polygon to the map
-          function addPolygonToMap(coordinates, warning, color) {
+          // Draw a single polygon on the map
+          function drawPolygon(coordinates, warning, color) {
               try {
                   // Convert coordinates from [lng, lat] to [lat, lng] for Leaflet
                   const latLngs = coordinates[0].map(coord => [coord[1], coord[0]]);
                   
-                  // Create polygon
+                  // Create polygon with styling based on warning type
                   const polygon = L.polygon(latLngs, {
                       color: color,
                       fillColor: color,
                       fillOpacity: 0.3,
-                      weight: 2
+                      weight: 2,
+                      opacity: 0.8
                   }).addTo(map);
                   
-                  // Add popup with warning details
-                  const popupContent = '<div style="color: #000;">' +
-                      '<h3>' + warning.Type + '</h3>' +
-                      '<p><strong>Severity:</strong> ' + warning.Severity + '</p>' +
-                      '<p><strong>Area:</strong> ' + warning.Area + '</p>' +
-                      '<p><strong>Expires:</strong> ' + formatTime(warning.ExpiresTime) + '</p>' +
+                  // Track this layer for cleanup
+                  warningLayers.push(polygon);
+                  
+                  // Create popup content with description
+                  const popupContent = '<div style="color: #000; min-width: 250px; max-width: 400px;">' +
+                      '<h3 style="margin-top: 0;">' + (warning.type || 'Unknown') + '</h3>' +
+                      '<p><strong>Severity:</strong> ' + (warning.severity || 'Unknown') + '</p>' +
+                      '<p><strong>Area:</strong> ' + (warning.area || 'Unknown') + '</p>' +
+                      '<p><strong>Issued:</strong> ' + formatTime(warning.time) + '</p>' +
+                      '<p><strong>Expires:</strong> ' + formatTime(warning.expiresTime) + '</p>' +
+                      (warning.description ? '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc;"><strong>Details:</strong><p style="margin-top: 5px; font-size: 0.9em; max-height: 200px; overflow-y: auto;">' + warning.description + '</p></div>' : '') +
                       '</div>';
                   
-                  polygon.bindPopup(popupContent);
+                  polygon.bindPopup(popupContent, {
+                      maxWidth: 400,
+                      maxHeight: 400
+                  });
                   
-                  console.log('Added polygon for:', warning.Type, 'in', warning.Area);
+                  // Add tooltip on hover
+                  polygon.bindTooltip((warning.type || 'Warning') + ' - ' + (warning.area || 'Unknown area'), {
+                      sticky: true
+                  });
+                  
+                  console.log('Drew polygon for:', warning.type, 'in', warning.area);
               } catch (error) {
-                  console.error('Error creating polygon for', warning.Type, ':', error);
-                  console.log('Coordinates:', coordinates);
+                  console.error('Error creating polygon for', warning.type, ':', error);
+                  throw error;
               }
           }
           
           // Add county boundaries as fallback when specific polygon is not available
           function addCountyFallback(warning, color) {
-              if (!countyBoundaries || !warning.SAME || warning.SAME.length === 0) {
+              if (!countyBoundaries || !warning.same || warning.same.length === 0) {
                   return false;
               }
               
               let addedAny = false;
               
-              // Convert SAME codes to FIPS format (SAME format is SSCCC where SS is state, CCC is county)
-              warning.SAME.forEach(sameCode => {
+              // Convert SAME codes to FIPS format and add county boundaries
+              warning.same.forEach(sameCode => {
                   // SAME code format: first 3 digits are state FIPS (with leading 0), last 3 are county FIPS
                   // We need it as 5 digits total for matching
                   const fipsCode = sameCode.substring(1); // Remove leading 0 to get standard 5-digit FIPS
@@ -569,30 +642,45 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   
                   if (county && county.geometry) {
                       try {
-                          // Add the county boundary to the map
+                          // Add the county boundary to the map with distinct styling
                           const geoJsonLayer = L.geoJSON(county, {
                               style: {
                                   color: color,
                                   fillColor: color,
-                                  fillOpacity: 0.2, // Lighter opacity for county fallback
+                                  fillOpacity: 0.15, // Lighter opacity for county fallback
                                   weight: 2,
-                                  dashArray: '5, 5' // Dashed line to indicate it's a county boundary, not exact polygon
+                                  opacity: 0.6,
+                                  dashArray: '5, 5' // Dashed line to indicate it's a county boundary
                               }
                           }).addTo(map);
                           
-                          // Add popup
-                          const popupContent = '<div style="color: #000;">' +
-                              '<h3>' + warning.Type + '</h3>' +
-                              '<p><strong>Severity:</strong> ' + warning.Severity + '</p>' +
-                              '<p><strong>Area:</strong> ' + warning.Area + '</p>' +
-                              '<p><strong>Expires:</strong> ' + formatTime(warning.ExpiresTime) + '</p>' +
-                              '<p style="font-style: italic; font-size: 0.9em;">Note: Showing county boundary (exact polygon unavailable)</p>' +
+                          // Track this layer for cleanup
+                          warningLayers.push(geoJsonLayer);
+                          
+                          // Create popup content with description
+                          const popupContent = '<div style="color: #000; min-width: 250px; max-width: 400px;">' +
+                              '<h3 style="margin-top: 0;">' + (warning.type || 'Unknown') + '</h3>' +
+                              '<p><strong>Severity:</strong> ' + (warning.severity || 'Unknown') + '</p>' +
+                              '<p><strong>Area:</strong> ' + (warning.area || 'Unknown') + '</p>' +
+                              '<p><strong>Issued:</strong> ' + formatTime(warning.time) + '</p>' +
+                              '<p><strong>Expires:</strong> ' + formatTime(warning.expiresTime) + '</p>' +
+                              (warning.description ? '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc;"><strong>Details:</strong><p style="margin-top: 5px; font-size: 0.9em; max-height: 200px; overflow-y: auto;">' + warning.description + '</p></div>' : '') +
+                              '<p style="font-style: italic; font-size: 0.85em; margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc;">' +
+                              '⚠️ Showing county boundary - exact warning polygon unavailable</p>' +
                               '</div>';
                           
-                          geoJsonLayer.bindPopup(popupContent);
-                          addedAny = true;
+                          geoJsonLayer.bindPopup(popupContent, {
+                              maxWidth: 400,
+                              maxHeight: 400
+                          });
                           
-                          console.log('Added county fallback for:', warning.Type, 'FIPS:', fipsCode);
+                          // Add tooltip
+                          geoJsonLayer.bindTooltip((warning.type || 'Warning') + ' - ' + (warning.area || 'Unknown area') + ' (County)', {
+                              sticky: true
+                          });
+                          
+                          addedAny = true;
+                          console.log('Added county fallback for:', warning.type, 'FIPS:', fipsCode);
                       } catch (error) {
                           console.error('Error adding county boundary:', error);
                       }
@@ -616,14 +704,14 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   let info = 'Total warnings in data: ' + warningsData.length + '\n\n';
                   
                   warningsData.forEach((warning, index) => {
-                      info += (index + 1) + '. ' + warning.Type + ' - ' + warning.Area + '\n';
-                      info += '   Severity: ' + warning.Severity + '\n';
-                      info += '   Has Geometry: ' + (warning.Geometry ? 'Yes' : 'NO') + '\n';
-                      if (warning.Geometry) {
-                          info += '   Geometry Type: ' + (warning.Geometry.type || 'unknown') + '\n';
+                      info += (index + 1) + '. ' + (warning.type || 'Unknown') + ' - ' + (warning.area || 'Unknown') + '\n';
+                      info += '   Severity: ' + (warning.severity || 'Unknown') + '\n';
+                      info += '   Has Geometry: ' + (warning.geometry ? 'Yes' : 'NO') + '\n';
+                      if (warning.geometry) {
+                          info += '   Geometry Type: ' + (warning.geometry.type || 'unknown') + '\n';
                       }
-                      if (warning.SAME && warning.SAME.length > 0) {
-                          info += '   SAME Codes: ' + warning.SAME.join(', ') + '\n';
+                      if (warning.same && warning.same.length > 0) {
+                          info += '   SAME Codes: ' + warning.same.join(', ') + '\n';
                           info += '   County Fallback: ' + (countyBoundaries ? 'Available' : 'Unavailable') + '\n';
                       }
                       info += '\n';
@@ -679,27 +767,31 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
     <body>
        <h1>Active Weather Warnings</h1>
        
-       <!-- Tab Navigation -->
-       <div class="tabs">
-          <div class="tab active" onclick="switchTab('list')">List View</div>
-          <div class="tab" onclick="switchTab('map')">Map View</div>
+       {{ if .WarningTypeCounts }}
+       <div class="warning-types" id="top">
+          {{ range .WarningTypeCounts }}
+             <div class="warning-type{{ if eq .Priority 1 }} tornado{{ else if eq .Priority 2 }} tstorm{{ else if eq .Priority 3 }} tornado-watch{{ else if eq .Priority 4 }} watch{{ end }}">
+               <a href="#{{ .Type | urlquery }}">{{ .Type }}</a>: {{ .Count }}
+             </div>
+          {{ end }}
+       </div>
+       {{ end }}
+       
+       <h4>Total Warnings: {{ .Counter }}</h4>
+       <h4>Last updated: {{ .LastUpdated }}</h4>
+       <div class="next-refresh">Next refresh in <span class="countdown">0:30</span></div>
+       
+       <!-- Map Section -->
+       <div id="map-section" style="margin-bottom: 30px;">
+          <h2 style="margin-top: 20px;">Map View</h2>
+          <button onclick="showDebugInfo()" style="margin-bottom: 10px; padding: 5px 10px; background-color: var(--header-bg); color: var(--text-color); border: 1px solid var(--header-border); border-radius: 3px; cursor: pointer;">Show Debug Info</button>
+          <div id="debug-info" style="display: none; background-color: var(--summary-bg); padding: 10px; margin-bottom: 10px; border-radius: 5px; font-family: monospace; font-size: 0.9em; max-height: 200px; overflow-y: auto;"></div>
+          <div id="map"></div>
        </div>
        
-       <!-- List Tab Content -->
-       <div id="list-content" class="tab-content active">
-          {{ if .WarningTypeCounts }}
-          <div class="warning-types" id="top">
-             {{ range .WarningTypeCounts }}
-                <div class="warning-type{{ if eq .Priority 1 }} tornado{{ else if eq .Priority 2 }} tstorm{{ else if eq .Priority 3 }} tornado-watch{{ else if eq .Priority 4 }} watch{{ end }}">
-                  <a href="#{{ .Type | urlquery }}">{{ .Type }}</a>: {{ .Count }}
-                </div>
-             {{ end }}
-          </div>
-          {{ end }}
-          
-          <h4>Total Warnings: {{ .Counter }}</h4>
-          <h4>Last updated: {{ .LastUpdated }}</h4>
-          <div class="next-refresh">Next refresh in <span class="countdown">0:30</span></div>
+       <!-- List Section -->
+       <div id="list-section">
+          <h2 style="margin-top: 20px;">List View</h2>
           
           {{ if eq (len .Warnings) 0 }}
              <p>No active weather warnings at this time.</p>
@@ -711,9 +803,9 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       <h2>{{ .Type }}</h2>
                    </div>
                 {{ else }}
-                   <div class="warning {{ .SeverityClass }}">
+                   <div class="warning {{ .SeverityClass }}" data-warning-id="{{ .ID }}">
                       <div class="warning-header">
-                         <h2>{{ .Type }}</h2>
+                         <h2 class="warning-title" style="cursor: pointer;" onclick="zoomToWarning('{{ .ID }}')">{{ .Type }}</h2>
                          <strong>{{ .Severity }} Severity</strong>
                       </div>
                       <p><strong>Area:</strong> {{ .Area }}</p>
@@ -730,43 +822,35 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           {{ end }}
        </div>
        
-       <!-- Map Tab Content -->
-       <div id="map-content" class="tab-content">
-          <h4>Total Warnings: {{ .Counter }}</h4>
-          <h4>Last updated: {{ .LastUpdated }}</h4>
-          <div class="next-refresh">Next refresh in <span class="countdown">0:30</span></div>
-          <button onclick="showDebugInfo()" style="margin-bottom: 10px; padding: 5px 10px; background-color: var(--header-bg); color: var(--text-color); border: 1px solid var(--header-border); border-radius: 3px; cursor: pointer;">Show Debug Info</button>
-          <div id="debug-info" style="display: none; background-color: var(--summary-bg); padding: 10px; margin-bottom: 10px; border-radius: 5px; font-family: monospace; font-size: 0.9em; max-height: 200px; overflow-y: auto;"></div>
-          <div id="map"></div>
-          <div class="map-legend">
-             <h3>Legend</h3>
-             <div class="legend-item">
-                <div class="legend-color" style="background-color: #ff69b4;"></div>
-                <span>Tornado Warning</span>
-             </div>
-             <div class="legend-item">
-                <div class="legend-color" style="background-color: #ff0000;"></div>
-                <span>Severe Thunderstorm Warning</span>
-             </div>
-             <div class="legend-item">
-                <div class="legend-color" style="background-color: #ffff00;"></div>
-                <span>Tornado Watch</span>
-             </div>
-             <div class="legend-item">
-                <div class="legend-color" style="background-color: #aaaa00;"></div>
-                <span>Severe Thunderstorm Watch</span>
-             </div>
-             <div class="legend-item">
-                <div class="legend-color" style="background-color: #a52a2a;"></div>
-                <span>Other Severe Warnings</span>
-             </div>
-             <div class="legend-item">
-                <div class="legend-color" style="background-color: #b25900;"></div>
-                <span>Moderate Warnings</span>
-             </div>
-             <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--card-border); font-size: 0.9em; color: #888;">
-                <strong>Note:</strong> Solid polygons show exact warning boundaries. Dashed lines indicate county boundaries (used when exact polygon unavailable).
-             </div>
+       <!-- Map Legend -->
+       <div class="map-legend" style="margin-top: 30px;">
+          <h3>Map Legend</h3>
+          <div class="legend-item">
+             <div class="legend-color" style="background-color: #ff69b4;"></div>
+             <span>Tornado Warning</span>
+          </div>
+          <div class="legend-item">
+             <div class="legend-color" style="background-color: #ff0000;"></div>
+             <span>Severe Thunderstorm Warning</span>
+          </div>
+          <div class="legend-item">
+             <div class="legend-color" style="background-color: #ffff00;"></div>
+             <span>Tornado Watch</span>
+          </div>
+          <div class="legend-item">
+             <div class="legend-color" style="background-color: #aaaa00;"></div>
+             <span>Severe Thunderstorm Watch</span>
+          </div>
+          <div class="legend-item">
+             <div class="legend-color" style="background-color: #a52a2a;"></div>
+             <span>Other Severe Warnings</span>
+          </div>
+          <div class="legend-item">
+             <div class="legend-color" style="background-color: #b25900;"></div>
+             <span>Moderate Warnings</span>
+          </div>
+          <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--card-border); font-size: 0.9em; color: #888;">
+             <strong>Note:</strong> Solid polygons show exact warning boundaries. Dashed lines indicate county boundaries (used when exact polygon unavailable).
           </div>
        </div>
        
@@ -876,6 +960,7 @@ type TemplateWarning struct {
 	LocalExpires     string // Local time of expiration
 	ExpiresTimestamp string // Unix timestamp for JavaScript countdown
 	ExtraClass       string // Extra CSS class for special warning types
+	ID               string // Warning ID for linking to map
 }
 
 // getWarningTypeRank assigns priority rank based on warning type
@@ -961,6 +1046,7 @@ func convertWarnings(warnings []fetcher.Warning) []TemplateWarning {
 			LocalExpires:     localExpires,
 			ExpiresTimestamp: expiresTimestamp,
 			ExtraClass:       "", // Will be set for headers later
+			ID:               warning.ID,
 		}
 
 		// If this is a new warning type, add it to our list of types
