@@ -111,7 +111,7 @@ func isFilteredWarning(eventType string) bool {
 
 	// ! UNCOMMENT BELOW TO KEEP WINTER STORM WARNINGS
 	/*if strings.Contains(lowercaseEvent, "winter storm") {
-	   return false
+		return false
 	}*/
 
 	if strings.Contains(lowercaseEvent, "severe thunderstorm") {
