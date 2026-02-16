@@ -10,13 +10,16 @@ import (
 
 // Warning Represents a weather warning
 type Warning struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	Description string `json:"description"`
-	Area        string `json:"area"`
-	Severity    string `json:"severity"`
-	Time        string `json:"time"`
-	ExpiresTime string `json:"expires_time"` // Added expires time field
+	ID          string      `json:"id"`
+	Type        string      `json:"type"`
+	Description string      `json:"description"`
+	Area        string      `json:"area"`
+	Severity    string      `json:"severity"`
+	Time        string      `json:"time"`
+	ExpiresTime string      `json:"expires_time"`
+	Geometry    interface{} `json:"geometry"`
+	UGC         []string    `json:"ugc"`  // Added for county fallback
+	SAME        []string    `json:"same"` // Added for county fallback
 }
 
 // FetchWarnings retrieves weather warnings from the National Weather Service API
@@ -44,15 +47,20 @@ func FetchWarnings() ([]Warning, error) {
 	// Parse JSON response
 	var apiResponse struct {
 		Features []struct {
+			Geometry   interface{} `json:"geometry"` // Added to capture geometry
 			Properties struct {
 				ID          string `json:"id"`
 				Event       string `json:"event"`
 				Description string `json:"description"`
 				Severity    string `json:"severity"`
 				Sent        string `json:"sent"`
-				Expires     string `json:"expires"` // Added expires field
+				Expires     string `json:"expires"`
 				Headline    string `json:"headline"`
 				Area        string `json:"areaDesc"`
+				Geocode     struct {
+					UGC  []string `json:"UGC"`
+					SAME []string `json:"SAME"`
+				} `json:"geocode"`
 			} `json:"properties"`
 		} `json:"features"`
 	}
@@ -81,7 +89,10 @@ func FetchWarnings() ([]Warning, error) {
 			Area:        feature.Properties.Area,
 			Severity:    feature.Properties.Severity,
 			Time:        feature.Properties.Sent,
-			ExpiresTime: feature.Properties.Expires, // Store the expires time
+			ExpiresTime: feature.Properties.Expires,
+			Geometry:    feature.Geometry, // Store the geometry data
+			UGC:         feature.Properties.Geocode.UGC,
+			SAME:        feature.Properties.Geocode.SAME,
 		})
 	}
 
