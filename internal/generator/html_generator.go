@@ -15,6 +15,12 @@ import (
 
 // GenerateWarningsHTML creates an HTML file with weather warnings
 func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
+	// Also generate JSON file for AJAX updates
+	jsonPath := strings.Replace(outputPath, ".html", ".json", 1)
+	if err := GenerateWarningsJSON(warnings, jsonPath); err != nil {
+		return fmt.Errorf("failed to generate JSON: %w", err)
+	}
+
 	// Define the HTML template
 	tmpl, err := template.New("warnings").Funcs(template.FuncMap{
 		"toJSON": toJSON,
@@ -23,7 +29,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
     <html lang="en">
     <head>
        <meta charset="UTF-8"/>
-       <meta http-equiv="refresh" content="30"> <!-- Auto-refresh every 30 seconds -->
        <title>US Weather Warnings</title>
        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -283,6 +288,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           let warningsData = {{ .WarningsJSON }};
           let countyBoundaries = null; // Will store county boundary data
           let warningLayers = []; // Track all warning layers for cleanup
+          let updateInterval = 30000; // 30 seconds in milliseconds
+          let lastUpdateTime = Date.now();
           
           // Load county boundaries from NWS GeoJSON
           async function loadCountyBoundaries() {
@@ -307,16 +314,112 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               warningLayers = [];
           }
           
+          // Fetch updated warnings data
+          async function fetchUpdatedWarnings() {
+              try {
+                  // Fetch the JSON data file (assumes it's in the same directory as the HTML)
+                  const response = await fetch(window.location.href.replace('.html', '.json') + '?t=' + Date.now());
+                  if (!response.ok) {
+                      throw new Error('Failed to fetch updates');
+                  }
+                  
+                  const data = await response.json();
+                  
+                  // Check if data is newer than what we have
+                  if (data.updatedAtUTC && data.updatedAtUTC * 1000 > lastUpdateTime) {
+                      console.log('New data available, updating...');
+                      lastUpdateTime = data.updatedAtUTC * 1000;
+                      
+                      // Update warnings data
+                      warningsData = data.warnings;
+                      
+                      // Update the statistics
+                      updateStats(data);
+                      
+                      // Clear old map layers and redraw
+                      clearWarningLayers();
+                      addWarningsToMap();
+                      
+                      // Update the list view
+                      updateListView(data.warnings);
+                      
+                      console.log('Update complete');
+                  } else {
+                      console.log('No new data available');
+                  }
+              } catch (error) {
+                  console.error('Error fetching updates:', error);
+              }
+          }
+          
+          // Update statistics display
+          function updateStats(data) {
+              // Update last updated time with local timezone
+              if (data.updatedAtUTC) {
+                  updateLastUpdatedTime(data.updatedAtUTC);
+              }
+              
+              // Update total warnings count
+              const statsElements = document.querySelectorAll('h4');
+              statsElements.forEach(el => {
+                  if (el.textContent.includes('Total Warnings:')) {
+                      el.textContent = 'Total Warnings: ' + data.counter;
+                  }
+              });
+          }
+          
+          // Update the list view with new warnings
+          function updateListView(warnings) {
+              // This is a simplified update - in a full implementation you might want to
+              // preserve scroll position, open popups, etc.
+              // For now, we'll just let the user manually refresh the page if they want the full list rebuilt
+              console.log('List view update - ' + warnings.length + ' warnings');
+              // The list will be fully rebuilt on next page load
+              // We're primarily updating the map here for real-time tracking
+          }
+          
+          // Format timestamp to user's local time
+          function formatLocalTime(timestamp) {
+              const date = new Date(timestamp * 1000); // Convert Unix timestamp to milliseconds
+              
+              // Format with user's locale and timezone
+              const options = {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  timeZoneName: 'short'
+              };
+              
+              return date.toLocaleString(undefined, options);
+          }
+          
+          // Update the last updated time display
+          function updateLastUpdatedTime(timestamp) {
+              const timeElement = document.getElementById('last-updated-time');
+              if (timeElement && timestamp) {
+                  timeElement.textContent = formatLocalTime(timestamp);
+              }
+          }
+          
           // Display countdown to next refresh
           window.onload = function() {
               // Initialize map immediately since it's always visible
               initMap();
               
+              // Update the last updated time to local timezone on initial load
+              const initialTimestamp = {{ .UpdatedAtUTC }};
+              if (initialTimestamp) {
+                  updateLastUpdatedTime(initialTimestamp);
+              }
+              
               // Set up refresh countdown
               let refreshTime = 30; // 30 seconds
               const countdownElements = document.querySelectorAll('.countdown');
               
-              setInterval(function() {
+              const countdownTimer = setInterval(function() {
                   refreshTime--;
                   const minutes = Math.floor(refreshTime / 60);
                   const seconds = refreshTime % 60;
@@ -328,10 +431,14 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   
                   if (refreshTime <= 0) {
                       countdownElements.forEach(function(element) {
-                          element.textContent = "Refreshing...";
+                          element.textContent = "Updating...";
                       });
+                      refreshTime = 30; // Reset for next cycle
                   }
               }, 1000);
+              
+              // Start periodic updates (every 30 seconds)
+              setInterval(fetchUpdatedWarnings, updateInterval);
               
               // Show/hide back-to-top button based on scroll position
               const backToTopButton = document.querySelector('.back-to-top');
@@ -778,7 +885,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        {{ end }}
        
        <h4>Total Warnings: {{ .Counter }}</h4>
-       <h4>Last updated: {{ .LastUpdated }}</h4>
+       <h4 id="last-updated">Last updated: <span id="last-updated-time">{{ .LastUpdated }}</span></h4>
        <div class="next-refresh">Next refresh in <span class="countdown">0:30</span></div>
        
        <!-- Map Section -->
@@ -875,12 +982,14 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
 		Counter           int
 		WarningTypeCounts []TypeCount
 		WarningsJSON      template.JS
+		UpdatedAtUTC      int64
 	}{
 		Warnings:          convertWarnings(warnings),
 		LastUpdated:       time.Now().UTC().Format("Jan 2, 2006 at 03:04:01 UTC"),
 		Counter:           len(warnings),
 		WarningTypeCounts: sortedWarningTypeCounts(warnings),
 		WarningsJSON:      template.JS(warningsJSON),
+		UpdatedAtUTC:      time.Now().UTC().Unix(),
 	}
 
 	// Create a buffer to store the rendered HTML
@@ -1226,4 +1335,29 @@ func getSeverityRank(severity string) int {
 	default:
 		return 0
 	}
+}
+
+// GenerateWarningsJSON creates a JSON file with current warnings data for AJAX updates
+func GenerateWarningsJSON(warnings []fetcher.Warning, outputPath string) error {
+	// Create a data structure for the JSON
+	data := struct {
+		Warnings     []fetcher.Warning `json:"warnings"`
+		LastUpdated  string            `json:"lastUpdated"`
+		Counter      int               `json:"counter"`
+		UpdatedAtUTC int64             `json:"updatedAtUTC"`
+	}{
+		Warnings:     warnings,
+		LastUpdated:  time.Now().UTC().Format("Jan 2, 2006 at 03:04:01 UTC"),
+		Counter:      len(warnings),
+		UpdatedAtUTC: time.Now().UTC().Unix(),
+	}
+
+	// Marshal to JSON
+	jsonData, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+
+	// Write to file
+	return os.WriteFile(outputPath, jsonData, 0644)
 }
