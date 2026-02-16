@@ -56,6 +56,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              --tornado-watch-bg: #4d4d10;
              --tornado-watch-border: #ffff00;
              --tab-active-bg: #3d3d5c;
+             --mcd-bg: #1a3d3d;
+             --mcd-border: #00aaaa;
           }
           
           body {
@@ -156,6 +158,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              background-color: var(--tstorm-bg);
              border-color: var(--tstorm-border);
           }
+          .warning.mcd {
+             background-color: var(--mcd-bg);
+             border-color: var(--mcd-border);
+          }
           .warning.header {
              background-color: var(--header-bg);
              border-color: var(--header-border);
@@ -228,6 +234,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              background-color: var(--watch-bg);
              border: 1px solid var(--watch-border);
           }
+          .warning-type.mcd {
+             background-color: var(--mcd-bg);
+             border: 1px solid var(--mcd-border);
+          }
           .warning-type a {
              color: var(--text-color);
              text-decoration: none;
@@ -288,8 +298,62 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           let warningsData = {{ .WarningsJSON }};
           let countyBoundaries = null; // Will store county boundary data
           let warningLayers = []; // Track all warning layers for cleanup
+          let mesoscaleDiscussions = []; // Store mesoscale discussions
           let updateInterval = 30000; // 30 seconds in milliseconds
           let lastUpdateTime = Date.now();
+          
+          // Fetch mesoscale discussions from SPC
+          async function fetchMesoscaleDiscussions() {
+              try {
+                  console.log('Fetching mesoscale discussions...');
+                  
+                  // Try the Iowa State Archive GeoJSON endpoint - it includes geometry
+                  let url = 'https://mesonet.agron.iastate.edu/geojson/spc_mcd.geojson';
+                  let response = await fetch(url);
+                  
+                  console.log('IEM MCD endpoint status:', response.status);
+                  
+                  // If that fails, try the direct SPC endpoint
+                  if (!response.ok) {
+                      console.log('IEM endpoint failed, trying SPC direct...');
+                      url = 'https://www.spc.noaa.gov/products/md/mcd.geojson';
+                      response = await fetch(url);
+                      console.log('SPC MCD endpoint status:', response.status);
+                  }
+                  
+                  // If that also fails, try the MapServer endpoint
+                  if (!response.ok) {
+                      console.log('SPC endpoint failed, trying MapServer...');
+                      url = 'https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/spc_mesoscale_discussion/MapServer/0/query?where=1%3D1&outFields=*&f=geojson';
+                      response = await fetch(url);
+                      console.log('MapServer MCD endpoint status:', response.status);
+                  }
+                  
+                  if (!response.ok) {
+                      throw new Error('Failed to fetch mesoscale discussions: ' + response.status);
+                  }
+                  
+                  const data = await response.json();
+                  console.log('MCD Response data:', data);
+                  console.log('MCD Features:', data.features);
+                  console.log('Fetched', (data.features || []).length, 'mesoscale discussions');
+                  
+                  // Filter out features with null geometry
+                  const validFeatures = (data.features || []).filter(feature => {
+                      if (!feature.geometry || feature.geometry === null) {
+                          console.log('Filtered out MCD with null geometry:', feature);
+                          return false;
+                      }
+                      return true;
+                  });
+                  
+                  console.log('Valid MCDs after filtering:', validFeatures.length);
+                  return validFeatures;
+              } catch (error) {
+                  console.error('Error fetching mesoscale discussions:', error);
+                  return [];
+              }
+          }
           
           // Load county boundaries from NWS GeoJSON
           async function loadCountyBoundaries() {
@@ -336,8 +400,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       // Update the statistics
                       updateStats(data);
                       
+                      // Fetch updated mesoscale discussions
+                      mesoscaleDiscussions = await fetchMesoscaleDiscussions();
+                      
                       // Clear old map layers and redraw
                       clearWarningLayers();
+                      addMesoscaleDiscussionsToMap();
+                      addMesoscaleDiscussionsToList();
                       addWarningsToMap();
                       
                       // Update the list view
@@ -366,6 +435,93 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       el.textContent = 'Total Warnings: ' + data.counter;
                   }
               });
+          }
+          
+          // Add mesoscale discussions to the list view
+          function addMesoscaleDiscussionsToList() {
+              const container = document.getElementById('mcd-container');
+              if (!container) {
+                  console.log('MCD container not found');
+                  return;
+              }
+              
+              if (mesoscaleDiscussions.length === 0) {
+                  container.innerHTML = '';
+                  return;
+              }
+              
+              // Create header for MCDs
+              let html = '<div class="warning header mcd-header" style="background-color: var(--mcd-bg); border-color: var(--mcd-border); grid-column: 1 / -1; margin-top: 15px; margin-bottom: 5px; padding: 2px 10px; border-width: 2px;">' +
+                  '<h2 style="margin: 5px 0; text-align: center; font-size: 1.2em;">Mesoscale Discussions</h2>' +
+                  '</div>';
+              
+              // Add container for MCD cards
+              html += '<div class="warnings-container">';
+              
+              mesoscaleDiscussions.forEach((mcd, index) => {
+                  const props = mcd.properties || {};
+                  const mcdNumber = props.name || props.prod_id || props.PROD_ID || props.disc_num || props.DISC_NUM || ('MCD-' + (index + 1));
+                  const mcdInfo = props.popupinfo || props.label || props.LABEL || props.discussion || 'Mesoscale discussion area';
+                  const mcdId = 'mcd-' + index;
+                  
+                  // Get issue and expiration times if available
+                  const issuedTime = props.issuance || props.issued || props.valid_time || '';
+                  const expiresTime = props.expiration || props.expires || props.expire_time || '';
+                  
+                  html += '<div class="warning mcd" data-mcd-id="' + mcdId + '">' +
+                      '<div class="warning-header">' +
+                      '<h2 class="warning-title" style="cursor: pointer;" onclick="zoomToMCD(' + index + ')">Mesoscale Discussion ' + mcdNumber + '</h2>' +
+                      '<strong>SPC MCD</strong>' +
+                      '</div>' +
+                      '<p>' + mcdInfo + '</p>';
+                  
+                  if (issuedTime) {
+                      html += '<small>Issued: ' + formatTime(issuedTime) + '</small><br>';
+                  }
+                  if (expiresTime) {
+                      html += '<small>Expires: ' + formatTime(expiresTime) + '</small>';
+                  }
+                  
+                  html += '</div>';
+              });
+              
+              html += '</div>';
+              container.innerHTML = html;
+              
+              console.log('Added', mesoscaleDiscussions.length, 'MCDs to list view');
+          }
+          
+          // Zoom to a specific MCD on the map
+          function zoomToMCD(index) {
+              // Scroll to map first
+              document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'center' });
+              
+              const mcd = mesoscaleDiscussions[index];
+              if (!mcd || !mcd.geometry) {
+                  console.log('MCD not found or has no geometry');
+                  return;
+              }
+              
+              try {
+                  // Calculate bounds from geometry
+                  let bounds;
+                  if (mcd.geometry.type === 'Polygon') {
+                      const coords = mcd.geometry.coordinates[0];
+                      const latLngs = coords.map(coord => [coord[1], coord[0]]);
+                      bounds = L.latLngBounds(latLngs);
+                  } else if (mcd.geometry.type === 'MultiPolygon') {
+                      const coords = mcd.geometry.coordinates[0][0];
+                      const latLngs = coords.map(coord => [coord[1], coord[0]]);
+                      bounds = L.latLngBounds(latLngs);
+                  }
+                  
+                  if (bounds) {
+                      map.fitBounds(bounds, { padding: [50, 50] });
+                      console.log('Zoomed to MCD', index);
+                  }
+              } catch (error) {
+                  console.error('Error zooming to MCD:', error);
+              }
           }
           
           // Update the list view with new warnings
@@ -540,6 +696,11 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   await loadCountyBoundaries();
               }
               
+              // Fetch and add mesoscale discussions
+              mesoscaleDiscussions = await fetchMesoscaleDiscussions();
+              addMesoscaleDiscussionsToMap();
+              addMesoscaleDiscussionsToList();
+              
               // Add warnings to map
               addWarningsToMap();
           }
@@ -554,6 +715,91 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   zoom: zoom
               };
               localStorage.setItem('mapState', JSON.stringify(state));
+          }
+          
+          // Add mesoscale discussions to the map
+          function addMesoscaleDiscussionsToMap() {
+              console.log('Adding MCDs to map. Total MCDs:', mesoscaleDiscussions.length);
+              
+              if (mesoscaleDiscussions.length === 0) {
+                  console.log('No mesoscale discussions to display');
+                  return;
+              }
+              
+              mesoscaleDiscussions.forEach((mcd, index) => {
+                  console.log('Processing MCD', index + 1, ':', mcd);
+                  console.log('Full MCD object:', JSON.stringify(mcd, null, 2));
+                  
+                  if (!mcd.geometry) {
+                      console.log('MCD', index + 1, 'has no geometry, skipping');
+                      return;
+                  }
+                  
+                  try {
+                      console.log('MCD geometry:', JSON.stringify(mcd.geometry, null, 2));
+                      console.log('MCD geometry type:', mcd.geometry.type);
+                      console.log('MCD geometry coordinates:', mcd.geometry.coordinates);
+                      console.log('MCD properties:', JSON.stringify(mcd.properties, null, 2));
+                      
+                      // Add MCD polygon to map with distinct styling
+                      const geoJsonLayer = L.geoJSON(mcd, {
+                          style: {
+                              color: '#00aaaa',
+                              fillColor: '#00aaaa',
+                              fillOpacity: 0.3,
+                              weight: 3,
+                              opacity: 1.0,
+                              dashArray: '10, 5'
+                          }
+                      }).addTo(map);
+                      
+                      console.log('Created geoJSON layer:', geoJsonLayer);
+                      console.log('Layer bounds:', geoJsonLayer.getBounds ? geoJsonLayer.getBounds() : 'No bounds');
+                      
+                      // Track this layer
+                      warningLayers.push(geoJsonLayer);
+                      
+                      // Get MCD properties - try all possible field names
+                      const props = mcd.properties || {};
+                      console.log('All property keys:', Object.keys(props));
+                      const mcdNumber = props.name || props.prod_id || props.PROD_ID || props.disc_num || props.DISC_NUM || 'Unknown';
+                      const mcdInfo = props.popupinfo || props.label || props.LABEL || props.discussion || 'No details available';
+                      
+                      console.log('MCD Number:', mcdNumber, 'Info:', mcdInfo);
+                      
+                      // Create popup
+                      const popupContent = '<div style="color: #000; min-width: 250px; max-width: 400px;">' +
+                          '<h3 style="margin-top: 0;">Mesoscale Discussion ' + mcdNumber + '</h3>' +
+                          '<p><strong>Type:</strong> SPC Mesoscale Discussion</p>' +
+                          '<div style="margin-top: 10px; font-size: 0.9em;">' + mcdInfo + '</div>' +
+                          '<div style="margin-top: 10px; font-size: 0.8em; color: #666;">' +
+                          'All properties: ' + JSON.stringify(props) +
+                          '</div>' +
+                          '</div>';
+                      
+                      geoJsonLayer.bindPopup(popupContent, {
+                          maxWidth: 400,
+                          maxHeight: 400
+                      });
+                      
+                      // Add tooltip
+                      geoJsonLayer.bindTooltip('MCD ' + mcdNumber, {
+                          sticky: true
+                      });
+                      
+                      console.log('Successfully added MCD:', mcdNumber);
+                      
+                      // Try to zoom to the MCD to see if it's there
+                      if (geoJsonLayer.getBounds) {
+                          console.log('MCD bounds:', geoJsonLayer.getBounds());
+                      }
+                  } catch (error) {
+                      console.error('Error adding MCD', index + 1, 'to map:', error);
+                      console.error('Error stack:', error.stack);
+                  }
+              });
+              
+              console.log('Finished adding', mesoscaleDiscussions.length, 'mesoscale discussions to map');
           }
           
           // Get color based on warning type
@@ -900,6 +1146,9 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        <div id="list-section">
           <h2 style="margin-top: 20px;">List View</h2>
           
+          <!-- Mesoscale Discussions Container (populated by JavaScript) -->
+          <div id="mcd-container"></div>
+          
           {{ if eq (len .Warnings) 0 }}
              <p>No active weather warnings at this time.</p>
           {{ else }}
@@ -949,6 +1198,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              <span>Severe Thunderstorm Watch</span>
           </div>
           <div class="legend-item">
+             <div class="legend-color" style="background-color: #00aaaa;"></div>
+             <span>Mesoscale Discussion (MCD)</span>
+          </div>
+          <div class="legend-item">
              <div class="legend-color" style="background-color: #a52a2a;"></div>
              <span>Other Severe Warnings</span>
           </div>
@@ -957,7 +1210,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              <span>Moderate Warnings</span>
           </div>
           <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--card-border); font-size: 0.9em; color: #888;">
-             <strong>Note:</strong> Solid polygons show exact warning boundaries. Dashed lines indicate county boundaries (used when exact polygon unavailable).
+             <strong>Note:</strong> Solid polygons show exact warning boundaries. Dashed lines indicate county boundaries (used when exact polygon unavailable) or mesoscale discussions.
           </div>
        </div>
        
