@@ -305,50 +305,60 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           // Fetch mesoscale discussions from SPC
           async function fetchMesoscaleDiscussions() {
               try {
-                  console.log('Fetching mesoscale discussions...');
-                  
-                  // Try the Iowa State Archive GeoJSON endpoint - it includes geometry
-                  let url = 'https://mesonet.agron.iastate.edu/geojson/spc_mcd.geojson';
-                  let response = await fetch(url);
-                  
-                  console.log('IEM MCD endpoint status:', response.status);
-                  
-                  // If that fails, try the direct SPC endpoint
+                  // IEM endpoint — returns recent MCDs, we filter to active ones below
+                  const url = 'https://mesonet.agron.iastate.edu/geojson/spc_mcd.geojson';
+                  const response = await fetch(url + '?ts=' + Date.now());
+
                   if (!response.ok) {
-                      console.log('IEM endpoint failed, trying SPC direct...');
-                      url = 'https://www.spc.noaa.gov/products/md/mcd.geojson';
-                      response = await fetch(url);
-                      console.log('SPC MCD endpoint status:', response.status);
+                      throw new Error('IEM MCD fetch failed: ' + response.status);
                   }
-                  
-                  // If that also fails, try the MapServer endpoint
-                  if (!response.ok) {
-                      console.log('SPC endpoint failed, trying MapServer...');
-                      url = 'https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/spc_mesoscale_discussion/MapServer/0/query?where=1%3D1&outFields=*&f=geojson';
-                      response = await fetch(url);
-                      console.log('MapServer MCD endpoint status:', response.status);
-                  }
-                  
-                  if (!response.ok) {
-                      throw new Error('Failed to fetch mesoscale discussions: ' + response.status);
-                  }
-                  
+
                   const data = await response.json();
-                  console.log('MCD Response data:', data);
-                  console.log('MCD Features:', data.features);
-                  console.log('Fetched', (data.features || []).length, 'mesoscale discussions');
-                  
-                  // Filter out features with null geometry
-                  const validFeatures = (data.features || []).filter(feature => {
-                      if (!feature.geometry || feature.geometry === null) {
-                          console.log('Filtered out MCD with null geometry:', feature);
-                          return false;
+                  const now = new Date();
+
+                  // Log raw properties from first feature so we can see field names/formats
+                  if (data.features && data.features.length > 0) {
+                      console.log('IEM MCD sample properties:', JSON.stringify(data.features[0].properties));
+                  }
+
+                  const active = (data.features || []).filter(feature => {
+                      const p = feature.properties || {};
+
+                      const rawExpire = p.expire ?? p.expiration ?? p.expires ?? p.valid_end ?? null;
+                      const rawIssue = p.issue ?? p.issued ?? p.issueTime ?? null;
+
+                      if (rawExpire) {
+                          const expireDate = new Date(rawExpire);
+                          if (!isNaN(expireDate.getTime())) {
+                              if (expireDate > now) {
+                                  return true;
+                              } else {
+                                  console.log('Filtering expired MCD', p.year, p.num, '— expired', rawExpire);
+                                  return false;
+                              }
+                          }
                       }
-                      return true;
+
+                      if (rawIssue) {
+                          const issueDate = new Date(rawIssue);
+                          if (!isNaN(issueDate.getTime())) {
+                              const hoursSinceIssue = (now - issueDate) / (1000 * 60 * 60);
+                              if (hoursSinceIssue <= 8) {
+                                  return true;
+                              } else {
+                                  console.log('Filtering stale MCD', p.year, p.num, '— issued', hoursSinceIssue.toFixed(1), 'hours ago');
+                                  return false;
+                              }
+                          }
+                      }
+
+                      console.log('Filtering MCD with no valid expire/issue time:', JSON.stringify(p));
+                      return false;
                   });
-                  
-                  console.log('Valid MCDs after filtering:', validFeatures.length);
-                  return validFeatures;
+
+                  console.log('MCDs fetched:', (data.features || []).length, '— active after filter:', active.length);
+                  return active;
+
               } catch (error) {
                   console.error('Error fetching mesoscale discussions:', error);
                   return [];
@@ -440,55 +450,45 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           // Add mesoscale discussions to the list view
           function addMesoscaleDiscussionsToList() {
               const container = document.getElementById('mcd-container');
-              if (!container) {
-                  console.log('MCD container not found');
-                  return;
-              }
+              if (!container) return;
               
               if (mesoscaleDiscussions.length === 0) {
                   container.innerHTML = '';
                   return;
               }
               
-              // Create header for MCDs
-              let html = '<div class="warning header mcd-header" style="background-color: var(--mcd-bg); border-color: var(--mcd-border); grid-column: 1 / -1; margin-top: 15px; margin-bottom: 5px; padding: 2px 10px; border-width: 2px;">' +
+              let html = '<div class="warning header" style="background-color: var(--mcd-bg); border-color: var(--mcd-border); grid-column: 1 / -1; margin-top: 15px; margin-bottom: 5px; padding: 2px 10px; border-width: 2px;">' +
                   '<h2 style="margin: 5px 0; text-align: center; font-size: 1.2em;">Mesoscale Discussions</h2>' +
-                  '</div>';
-              
-              // Add container for MCD cards
-              html += '<div class="warnings-container">';
+                  '</div>' +
+                  '<div class="warnings-container">';
               
               mesoscaleDiscussions.forEach((mcd, index) => {
-                  const props = mcd.properties || {};
-                  const mcdNumber = props.name || props.prod_id || props.PROD_ID || props.disc_num || props.DISC_NUM || ('MCD-' + (index + 1));
-                  const mcdInfo = props.popupinfo || props.label || props.LABEL || props.discussion || 'Mesoscale discussion area';
-                  const mcdId = 'mcd-' + index;
+                  const props     = mcd.properties || {};
+                  const mcdNum    = props.num  ? String(props.num).padStart(4, '0') : (index + 1);
+                  const year      = props.year || new Date().getFullYear();
+                  const concerning = props.concerning || '';
+                  const issued    = props.issue  || '';
+                  const expires   = props.expire || '';
+                  const spcUrl    = props.year && props.num
+                      ? 'https://www.spc.noaa.gov/products/md/' + year + '/md' + String(props.num).padStart(4,'0') + '.html'
+                      : '';
                   
-                  // Get issue and expiration times if available
-                  const issuedTime = props.issuance || props.issued || props.valid_time || '';
-                  const expiresTime = props.expiration || props.expires || props.expire_time || '';
-                  
-                  html += '<div class="warning mcd" data-mcd-id="' + mcdId + '">' +
+                  html += '<div class="warning mcd">' +
                       '<div class="warning-header">' +
-                      '<h2 class="warning-title" style="cursor: pointer;" onclick="zoomToMCD(' + index + ')">Mesoscale Discussion ' + mcdNumber + '</h2>' +
+                      '<h2 class="warning-title" style="cursor: pointer;" onclick="zoomToMCD(' + index + ')">Mesoscale Discussion ' + mcdNum + '</h2>' +
                       '<strong>SPC MCD</strong>' +
-                      '</div>' +
-                      '<p>' + mcdInfo + '</p>';
+                      '</div>';
                   
-                  if (issuedTime) {
-                      html += '<small>Issued: ' + formatTime(issuedTime) + '</small><br>';
-                  }
-                  if (expiresTime) {
-                      html += '<small>Expires: ' + formatTime(expiresTime) + '</small>';
-                  }
+                  if (concerning) html += '<p><strong>Concerning:</strong> ' + concerning + '</p>';
+                  if (issued)     html += '<small>Issued: '  + formatTime(issued)  + '</small><br>';
+                  if (expires)    html += '<small>Expires: ' + formatTime(expires) + '</small>';
+                  if (spcUrl)     html += '<br><small><a href="' + spcUrl + '" target="_blank" style="color: #00aaaa;">View full discussion ↗</a></small>';
                   
                   html += '</div>';
               });
               
               html += '</div>';
               container.innerHTML = html;
-              
-              console.log('Added', mesoscaleDiscussions.length, 'MCDs to list view');
           }
           
           // Zoom to a specific MCD on the map
@@ -719,87 +719,53 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           
           // Add mesoscale discussions to the map
           function addMesoscaleDiscussionsToMap() {
-              console.log('Adding MCDs to map. Total MCDs:', mesoscaleDiscussions.length);
-              
               if (mesoscaleDiscussions.length === 0) {
-                  console.log('No mesoscale discussions to display');
                   return;
               }
               
               mesoscaleDiscussions.forEach((mcd, index) => {
-                  console.log('Processing MCD', index + 1, ':', mcd);
-                  console.log('Full MCD object:', JSON.stringify(mcd, null, 2));
-                  
-                  if (!mcd.geometry) {
-                      console.log('MCD', index + 1, 'has no geometry, skipping');
-                      return;
-                  }
+                  if (!mcd.geometry) return;
                   
                   try {
-                      console.log('MCD geometry:', JSON.stringify(mcd.geometry, null, 2));
-                      console.log('MCD geometry type:', mcd.geometry.type);
-                      console.log('MCD geometry coordinates:', mcd.geometry.coordinates);
-                      console.log('MCD properties:', JSON.stringify(mcd.properties, null, 2));
-                      
-                      // Add MCD polygon to map with distinct styling
                       const geoJsonLayer = L.geoJSON(mcd, {
                           style: {
                               color: '#00aaaa',
                               fillColor: '#00aaaa',
-                              fillOpacity: 0.3,
-                              weight: 3,
-                              opacity: 1.0,
+                              fillOpacity: 0.2,
+                              weight: 2,
+                              opacity: 0.8,
                               dashArray: '10, 5'
                           }
                       }).addTo(map);
                       
-                      console.log('Created geoJSON layer:', geoJsonLayer);
-                      console.log('Layer bounds:', geoJsonLayer.getBounds ? geoJsonLayer.getBounds() : 'No bounds');
-                      
-                      // Track this layer
                       warningLayers.push(geoJsonLayer);
                       
-                      // Get MCD properties - try all possible field names
+                      // IEM fields: year, num, issue, expire, watch_confidence, concerning
                       const props = mcd.properties || {};
-                      console.log('All property keys:', Object.keys(props));
-                      const mcdNumber = props.name || props.prod_id || props.PROD_ID || props.disc_num || props.DISC_NUM || 'Unknown';
-                      const mcdInfo = props.popupinfo || props.label || props.LABEL || props.discussion || 'No details available';
+                      const mcdNum  = props.num  ? String(props.num).padStart(4, '0') : (index + 1);
+                      const year    = props.year  || new Date().getFullYear();
+                      const concerning = props.concerning || '';
+                      const issued  = props.issue  || '';
+                      const expires = props.expire || '';
+                      const spcUrl  = props.year && props.num
+                          ? 'https://www.spc.noaa.gov/products/md/' + year + '/md' + String(props.num).padStart(4,'0') + '.html'
+                          : '';
                       
-                      console.log('MCD Number:', mcdNumber, 'Info:', mcdInfo);
-                      
-                      // Create popup
                       const popupContent = '<div style="color: #000; min-width: 250px; max-width: 400px;">' +
-                          '<h3 style="margin-top: 0;">Mesoscale Discussion ' + mcdNumber + '</h3>' +
-                          '<p><strong>Type:</strong> SPC Mesoscale Discussion</p>' +
-                          '<div style="margin-top: 10px; font-size: 0.9em;">' + mcdInfo + '</div>' +
-                          '<div style="margin-top: 10px; font-size: 0.8em; color: #666;">' +
-                          'All properties: ' + JSON.stringify(props) +
-                          '</div>' +
+                          '<h3 style="margin-top: 0;">Mesoscale Discussion ' + mcdNum + '</h3>' +
+                          (concerning ? '<p><strong>Concerning:</strong> ' + concerning + '</p>' : '') +
+                          (issued  ? '<p><strong>Issued:</strong> '  + formatTime(issued)  + '</p>' : '') +
+                          (expires ? '<p><strong>Expires:</strong> ' + formatTime(expires) + '</p>' : '') +
+                          (spcUrl  ? '<p><a href="' + spcUrl + '" target="_blank">View full discussion ↗</a></p>' : '') +
                           '</div>';
                       
-                      geoJsonLayer.bindPopup(popupContent, {
-                          maxWidth: 400,
-                          maxHeight: 400
-                      });
+                      geoJsonLayer.bindPopup(popupContent, { maxWidth: 400 });
+                      geoJsonLayer.bindTooltip('MCD ' + mcdNum + (concerning ? ' – ' + concerning : ''), { sticky: true });
                       
-                      // Add tooltip
-                      geoJsonLayer.bindTooltip('MCD ' + mcdNumber, {
-                          sticky: true
-                      });
-                      
-                      console.log('Successfully added MCD:', mcdNumber);
-                      
-                      // Try to zoom to the MCD to see if it's there
-                      if (geoJsonLayer.getBounds) {
-                          console.log('MCD bounds:', geoJsonLayer.getBounds());
-                      }
                   } catch (error) {
-                      console.error('Error adding MCD', index + 1, 'to map:', error);
-                      console.error('Error stack:', error.stack);
+                      console.error('Error adding MCD to map:', error);
                   }
               });
-              
-              console.log('Finished adding', mesoscaleDiscussions.length, 'mesoscale discussions to map');
           }
           
           // Get color based on warning type
@@ -1118,7 +1084,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        </script>
     </head>
     <body>
-       <h1>Active Weather Warnings</h1>
+       <h1 style="text-align: center;">Active Weather Warnings</h1>
        
        {{ if .WarningTypeCounts }}
        <div class="warning-types" id="top">

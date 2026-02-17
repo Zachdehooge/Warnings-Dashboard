@@ -179,6 +179,7 @@ func isFilteredWarning(eventType string) bool {
 		"avalanche advisory",
 		"ashfall advisory",
 		"avalanche watch",
+		"freezing fog advisory",
 	}
 
 	// Check if the event type contains any filtered keywords
