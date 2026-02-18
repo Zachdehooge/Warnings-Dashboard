@@ -419,8 +419,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           }
 
           // The 'name' field from the MapServer IS the MCD number (e.g. "421" or "0421").
-          // The MapServer 'name' field may come back as "MD 0091" or "0091".
-          // Strip any non-digit characters before zero-padding to get a clean number.
+          // Strip any non-digit characters.
           function extractMCDNumber(props) {
               if (!props.name) return '????';
               const digits = String(props.name).replace(/[^0-9]/g, '');
@@ -679,8 +678,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   html += '<div class="warning-header">' +
                       '<h2 class="warning-title" style="cursor:pointer;" onclick="zoomToMCD(' + index + ')">' +
                           'MCD #' + mcdNum +
-                      '</h2>' +
-                      '<strong>SPC</strong>';
+                      '</h2>';
                   if (parsed.probability) {
                       html += ' <span style="color:#ff6600; font-weight:bold;">POWI: ' + escapeHtml(parsed.probability) + '</span>';
                   }
@@ -697,9 +695,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   if (parsed.concerning) {
                       html += '<p style="margin:2px 0;"><strong>Concerning:</strong> ' + escapeHtml(parsed.concerning) + '</p>';
                   }
-                  if (parsed.valid) {
-                      html += '<p style="margin:2px 0;"><strong>Valid:</strong> ' + escapeHtml(parsed.valid) + '</p>';
-                  }
                   if (parsed.summary) {
                       html += '<div class="mcd-description" style="max-height:120px;">' +
                           '<strong>Summary:</strong> ' + escapeHtml(parsed.summary) +
@@ -714,16 +709,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       html += '<div class="mcd-description" style="max-height:120px; margin-top:6px;">' +
                           '<strong>Summary:</strong> ' + escapeHtml(parsed.summary) +
                       '</div>';
-                  } else if (parsed.area || parsed.concerning || parsed.valid) {
+                  } else if (parsed.area || parsed.concerning) {
                       // Has structured fields but no summary/discussion - show what we have
                       if (parsed.area) {
                           html += '<p style="margin:6px 0 2px;"><strong>Area:</strong> ' + escapeHtml(parsed.area) + '</p>';
                       }
                       if (parsed.concerning) {
                           html += '<p style="margin:2px 0;"><strong>Concerning:</strong> ' + escapeHtml(parsed.concerning) + '</p>';
-                      }
-                      if (parsed.valid) {
-                          html += '<p style="margin:2px 0;"><strong>Valid:</strong> ' + escapeHtml(parsed.valid) + '</p>';
                       }
                   } else if (props._fullText) {
                       // No structured fields - show raw full text
@@ -978,8 +970,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       if (parsed.area || parsed.concerning || parsed.summary || parsed.discussion || parsed.probability) {
                           if (parsed.area)      bodyHtml += '<p style="margin:3px 0;"><strong>Area:</strong> '       + escapeHtml(parsed.area)       + '</p>';
                           if (parsed.concerning) bodyHtml += '<p style="margin:3px 0;"><strong>Concerning:</strong> ' + escapeHtml(parsed.concerning) + '</p>';
-                          if (parsed.valid)      bodyHtml += '<p style="margin:3px 0;"><strong>Valid:</strong> '      + escapeHtml(parsed.valid)      + '</p>';
-                          if (parsed.probability) bodyHtml += '<p style="margin:3px 0;"><strong>Probability of Watch Issuance:</strong> ' + escapeHtml(parsed.probability) + '</p>';
                           if (parsed.summary) {
                               bodyHtml += '<div style="margin-top:8px; padding-top:8px; border-top:1px solid #ccc;">' +
                                   '<strong>Summary:</strong>' +
