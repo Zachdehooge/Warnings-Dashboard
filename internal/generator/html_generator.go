@@ -462,7 +462,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               }
               const date = new Date(Date.UTC(year, month, day, hour, min));
               return date.toLocaleString(undefined, {
-                  month: 'short', day: 'numeric',
+                  year: 'numeric', month: 'short', day: 'numeric',
                   hour: 'numeric', minute: '2-digit',
                   timeZoneName: 'short'
               });
@@ -1006,7 +1006,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       let popupContent =
                           '<div style="color:#000; min-width:260px; max-width:460px;">' +
                           '<h3 style="margin-top:0; margin-bottom:6px; color:#006666;">MCD #' + mcdNum + '</h3>' +
-                          '<p style="margin:3px 0;"><strong>Source:</strong> Storm Prediction Center</p>' +
                           '<p style="margin:3px 0;"><strong>Issued:</strong> ' + escapeHtml(issued) + '</p>';
                       if (expire) {
                           popupContent += '<p style="margin:3px 0;"><strong>Expires:</strong> ' + escapeHtml(formatExpireToLocal(expire, props._fullText)) + '</p>';
