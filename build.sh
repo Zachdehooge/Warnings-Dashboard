@@ -1,6 +1,7 @@
 # Clean up old files
 rm -f warnings.html
 rm -f weather-warnings
+rm -f warnings.json
 
 # Build Go app
 go build -o weather-warnings ./cmd

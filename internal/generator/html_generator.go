@@ -427,10 +427,46 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               return digits ? digits.padStart(4, '0') : '????';
           }
 
-          // ArcGIS dates are Unix milliseconds; convert to a locale string.
+          // ArcGIS dates are Unix milliseconds; convert to a locale string with timezone.
           function formatArcGISDate(msTimestamp) {
               if (!msTimestamp && msTimestamp !== 0) return 'Not specified';
-              return new Date(msTimestamp).toLocaleString();
+              return new Date(msTimestamp).toLocaleString(undefined, {
+                  year: 'numeric', month: 'short', day: 'numeric',
+                  hour: 'numeric', minute: '2-digit', second: '2-digit',
+                  timeZoneName: 'short'
+              });
+          }
+
+          // Extract expire time from valid time string (e.g., "180148Z - 180445Z" -> "180445Z")
+          function extractExpireTime(validStr) {
+              if (!validStr) return '';
+              const match = validStr.match(/-\s*(\d{6}Z)/);
+              return match ? match[1] : '';
+          }
+
+          // Format UTC time like "180445Z" to local time string
+          function formatExpireToLocal(utcStr, rawText) {
+              if (!utcStr || utcStr.length !== 7) return utcStr;
+              const day = parseInt(utcStr.substring(0, 2));
+              const hour = parseInt(utcStr.substring(2, 4));
+              const min = parseInt(utcStr.substring(4, 6));
+              let month = new Date().getUTCMonth();
+              let year = new Date().getUTCFullYear();
+              if (rawText) {
+                  const monthMatch = rawText.match(/\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{4}/i);
+                  if (monthMatch) {
+                      const months = { 'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5, 'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11 };
+                      month = months[monthMatch[1]];
+                      const yearMatch = rawText.match(/[A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+(\d{4})/);
+                      if (yearMatch) year = parseInt(yearMatch[1]);
+                  }
+              }
+              const date = new Date(Date.UTC(year, month, day, hour, min));
+              return date.toLocaleString(undefined, {
+                  month: 'short', day: 'numeric',
+                  hour: 'numeric', minute: '2-digit',
+                  timeZoneName: 'short'
+              });
           }
 
           // Build the SPC product page URL for a given zero-padded MCD number.
@@ -457,16 +493,19 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           //
           //   ..Forecaster Name.. DD/HHMM UTC
           function parseMCDText(rawText) {
-              if (!rawText) return { area: '', concerning: '', valid: '', summary: '', discussion: '', raw: '' };
+              if (!rawText) return { area: '', concerning: '', valid: '', summary: '', discussion: '', probability: '', raw: '' };
 
               const startIdx = rawText.indexOf('MESOSCALE DISCUSSION');
               const text = startIdx >= 0 ? rawText.substring(startIdx) : rawText;
 
               // Grab single-line value after LABEL...
               const getInline = (label) => {
-                  const re = new RegExp(label + '\\.{3}(.+)', 'i');
+                  const re = new RegExp('^' + label + '\\.{3}(.+)$', 'im');
                   const m  = text.match(re);
-                  return m ? m[1].trim() : '';
+                  if (m) return m[1].trim();
+                  const re2 = new RegExp('^' + label + '\\s+(.+)$', 'im');
+                  const m2 = text.match(re2);
+                  return m2 ? m2[1].trim() : '';
               };
 
               // Grab multi-line block after LABEL... until next ALL-CAPS header or ..sig
@@ -485,8 +524,45 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   valid:      getInline('VALID'),
                   summary:    getBlock('SUMMARY'),
                   discussion: getBlock('DISCUSSION'),
+                  probability: getInline('PROBABILITY OF WATCH ISSUANCE'),
+                  issuedTime: getInline('TIME'),
                   raw:        text
               };
+          }
+
+          // Parse issued time from raw text (e.g., "0748 PM CST Tue Feb 17 2026")
+          function parseIssuedTime(rawText) {
+              if (!rawText) return null;
+              const match = rawText.match(/(\d{2})(\d{2})\s+(AM|PM)\s+(CST|CDT|MST|MDT|EST|EDT|PST|PDT)\s+([A-Z][a-z]{2})\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{4})/i);
+              if (!match) return null;
+              const hour12 = parseInt(match[1]);
+              const minute = parseInt(match[2]);
+              const ampm = match[3].toUpperCase();
+              const tz = match[4].toUpperCase();
+              const monthStr = match[6];
+              const day = parseInt(match[7]);
+              const year = parseInt(match[8]);
+              let hour = hour12;
+              if (ampm === 'PM' && hour !== 12) hour += 12;
+              if (ampm === 'AM' && hour === 12) hour = 0;
+              const months = { 'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5, 'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11 };
+              const month = months[monthStr];
+              const tzOffsets = { 'CST': 6, 'CDT': 5, 'MST': 7, 'MDT': 6, 'EST': 5, 'EDT': 4, 'PST': 8, 'PDT': 7 };
+              const offset = tzOffsets[tz] || 0;
+              const utcHour = (hour + offset) % 24;
+              const utcDay = utcHour < hour ? day + 1 : day;
+              const date = new Date(Date.UTC(year, month, utcDay, utcHour, minute, 0));
+              return isNaN(date.getTime()) ? null : date;
+          }
+
+          // Format Date object to local time string
+          function formatDateToLocal(dateObj) {
+              if (!dateObj || isNaN(dateObj.getTime())) return 'Not specified';
+              return dateObj.toLocaleString(undefined, {
+                  year: 'numeric', month: 'short', day: 'numeric',
+                  hour: 'numeric', minute: '2-digit', second: '2-digit',
+                  timeZoneName: 'short'
+              });
           }
           
           // Load county boundaries from NWS GeoJSON
@@ -586,9 +662,11 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               mesoscaleDiscussions.forEach((mcd, index) => {
                   const props   = mcd.properties || {};
                   const mcdNum  = extractMCDNumber(props);
-                  const issued  = props.idp_filedate ? formatArcGISDate(props.idp_filedate) : 'Not specified';
-                  const spcUrl  = mcdSPCLink(mcdNum);
                   const parsed  = parseMCDText(props._fullText || '');
+                  const issuedDate = parseIssuedTime(props._fullText);
+                  const issued = issuedDate ? formatDateToLocal(issuedDate) : (props.idp_filedate ? formatArcGISDate(props.idp_filedate) : 'Not specified');
+                  const spcUrl  = mcdSPCLink(mcdNum);
+                  const expire  = extractExpireTime(parsed.valid);
 
                   html += '<div class="warning mcd">';
                   html += '<div class="warning-header">' +
@@ -598,7 +676,11 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       '<strong>SPC</strong>' +
                   '</div>';
 
-                  html += '<small><strong>Issued:</strong> ' + escapeHtml(issued) + '</small>';
+                  html += '<small><strong>Issued:</strong> ' + escapeHtml(issued);
+                  if (expire) {
+                      html += ' &nbsp;|&nbsp; <strong>Expires:</strong> ' + escapeHtml(formatExpireToLocal(expire, props._fullText));
+                  }
+                  html += '</small>';
 
                   if (parsed.area) {
                       html += '<p style="margin:6px 0 2px;"><strong>Area:</strong> ' + escapeHtml(parsed.area) + '</p>';
@@ -608,6 +690,9 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   }
                   if (parsed.valid) {
                       html += '<p style="margin:2px 0;"><strong>Valid:</strong> ' + escapeHtml(parsed.valid) + '</p>';
+                  }
+                  if (parsed.probability) {
+                      html += '<p style="margin:2px 0;"><strong>Probability of Watch Issuance:</strong> ' + escapeHtml(parsed.probability) + '</p>';
                   }
                   if (parsed.summary) {
                       html += '<div class="mcd-description" style="max-height:120px;">' +
@@ -861,9 +946,11 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   try {
                       const props  = mcd.properties || {};
                       const mcdNum = extractMCDNumber(props);
-                      const issued = props.idp_filedate ? formatArcGISDate(props.idp_filedate) : 'Not specified';
-                      const spcUrl = mcdSPCLink(mcdNum);
                       const parsed = parseMCDText(props._fullText || '');
+                      const issuedDate = parseIssuedTime(props._fullText);
+                      const issued = issuedDate ? formatDateToLocal(issuedDate) : (props.idp_filedate ? formatArcGISDate(props.idp_filedate) : 'Not specified');
+                      const spcUrl = mcdSPCLink(mcdNum);
+                      const expire  = extractExpireTime(parsed.valid);
 
                       const geoJsonLayer = L.geoJSON(mcd, {
                           style: {
@@ -880,10 +967,11 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
 
                       // Build popup — prefer parsed structured fields, fall back to popupinfo snippet
                       let bodyHtml = '';
-                      if (parsed.area || parsed.concerning || parsed.summary || parsed.discussion) {
+                      if (parsed.area || parsed.concerning || parsed.summary || parsed.discussion || parsed.probability) {
                           if (parsed.area)      bodyHtml += '<p style="margin:3px 0;"><strong>Area:</strong> '       + escapeHtml(parsed.area)       + '</p>';
                           if (parsed.concerning) bodyHtml += '<p style="margin:3px 0;"><strong>Concerning:</strong> ' + escapeHtml(parsed.concerning) + '</p>';
                           if (parsed.valid)      bodyHtml += '<p style="margin:3px 0;"><strong>Valid:</strong> '      + escapeHtml(parsed.valid)      + '</p>';
+                          if (parsed.probability) bodyHtml += '<p style="margin:3px 0;"><strong>Probability of Watch Issuance:</strong> ' + escapeHtml(parsed.probability) + '</p>';
                           if (parsed.summary) {
                               bodyHtml += '<div style="margin-top:8px; padding-top:8px; border-top:1px solid #ccc;">' +
                                   '<strong>Summary:</strong>' +
@@ -917,11 +1005,15 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                           }
                       }
 
-                      const popupContent =
+                      let popupContent =
                           '<div style="color:#000; min-width:260px; max-width:460px;">' +
                           '<h3 style="margin-top:0; margin-bottom:6px; color:#006666;">MCD #' + mcdNum + '</h3>' +
                           '<p style="margin:3px 0;"><strong>Source:</strong> Storm Prediction Center</p>' +
-                          '<p style="margin:3px 0;"><strong>Issued:</strong> ' + escapeHtml(issued) + '</p>' +
+                          '<p style="margin:3px 0;"><strong>Issued:</strong> ' + escapeHtml(issued);
+                      if (expire) {
+                          popupContent += ' &nbsp;|&nbsp; <strong>Expires:</strong> ' + escapeHtml(formatExpireToLocal(expire, props._fullText));
+                      }
+                      popupContent += '</p>' +
                           bodyHtml +
                           '<p style="margin-top:10px; padding-top:8px; border-top:1px solid #ccc;">' +
                           '<a href="' + spcUrl + '" target="_blank" style="color:#006666; font-weight:bold;">View full discussion on SPC ↗</a>' +
