@@ -244,11 +244,15 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               border: 1px solid #b25900;
            }
            .warning-type a {
-             color: var(--text-color);
-             text-decoration: none;
-             transition: color 0.2s;
-          }
-          .warning-type a:hover {
+              color: var(--text-color);
+              text-decoration: none;
+              transition: color 0.2s;
+           }
+           .warning-type.severe {
+              background-color: var(--severe-bg);
+              border: 1px solid var(--severe-border);
+           }
+           .warning-type a:hover {
              color: #add8e6;
              text-decoration: underline;
           }
