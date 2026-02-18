@@ -350,12 +350,11 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       const mcdNum = extractMCDNumber(props);
                       const spcUrl = mcdSPCLink(mcdNum);
                       try {
-                          const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(spcUrl);
-                          const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+                          const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(spcUrl);
+                          const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
                           if (!r.ok) throw new Error('proxy HTTP ' + r.status);
 
-                          const json  = await r.json();
-                          const html  = json.contents || '';
+                          const html  = await r.text();
                           // SPC page has exactly one <pre> containing the raw discussion text
                           const preMatch = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
                           if (preMatch) {
@@ -449,11 +448,14 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   return m ? m[1].trim() : '';
               };
 
-              // Grab multi-line block after LABEL...\n until next ALL-CAPS... header or ..sig
+              // Grab multi-line block after LABEL... until next ALL-CAPS header or ..sig
               const getBlock = (label) => {
-                  const re = new RegExp(label + '\\.{3}\\s*\\n([\\s\\S]*?)(?=\\n[A-Z][A-Z .]{2,}\\.{3}|\\n\\.\\.)', 'i');
+                  const re = new RegExp(label + '\\.{3}[\\s\\S]*?(?=\\n[A-Z][A-Z .]{2,}\\.{3}|\\n\\.\\.|[A-Z][A-Z]+\\.{3}|\\nMESOSCALE|$)', 'i');
                   const m  = text.match(re);
-                  return m ? m[1].replace(/\s+/g, ' ').trim() : '';
+                  if (!m) return '';
+                  let content = m[0];
+                  content = content.replace(new RegExp('^' + label + '\\.{3}', 'i'), '');
+                  return content.replace(/\s+/g, ' ').trim();
               };
 
               return {
@@ -583,7 +585,36 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       html += '<div class="mcd-description" style="max-height:120px;">' +
                           '<strong>Summary:</strong> ' + escapeHtml(parsed.summary) +
                       '</div>';
-                  } else if (!parsed.area && !parsed.concerning) {
+                  }
+
+                  if (parsed.discussion) {
+                      html += '<div class="mcd-description" style="max-height:150px; margin-top:6px;">' +
+                          '<strong>Discussion:</strong> ' + escapeHtml(parsed.discussion) +
+                      '</div>';
+                  } else if (parsed.summary) {
+                      html += '<div class="mcd-description" style="max-height:120px; margin-top:6px;">' +
+                          '<strong>Summary:</strong> ' + escapeHtml(parsed.summary) +
+                      '</div>';
+                  } else if (parsed.area || parsed.concerning || parsed.valid) {
+                      // Has structured fields but no summary/discussion - show what we have
+                      if (parsed.area) {
+                          html += '<p style="margin:6px 0 2px;"><strong>Area:</strong> ' + escapeHtml(parsed.area) + '</p>';
+                      }
+                      if (parsed.concerning) {
+                          html += '<p style="margin:2px 0;"><strong>Concerning:</strong> ' + escapeHtml(parsed.concerning) + '</p>';
+                      }
+                      if (parsed.valid) {
+                          html += '<p style="margin:2px 0;"><strong>Valid:</strong> ' + escapeHtml(parsed.valid) + '</p>';
+                      }
+                  } else if (props._fullText) {
+                      // No structured fields - show raw full text
+                      const plainText = props._fullText.replace(/\s+/g, ' ').trim();
+                      if (plainText) {
+                          html += '<div class="mcd-description">' +
+                              escapeHtml(plainText.substring(0, 500)) + (plainText.length > 500 ? '…' : '') +
+                          '</div>';
+                      }
+                  } else {
                       // No structured text available yet — show raw popupinfo snippet
                       const rawPopup  = props.popupinfo || '';
                       const plainText = rawPopup.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -800,7 +831,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
 
                       // Build popup — prefer parsed structured fields, fall back to popupinfo snippet
                       let bodyHtml = '';
-                      if (parsed.area || parsed.concerning || parsed.summary) {
+                      if (parsed.area || parsed.concerning || parsed.summary || parsed.discussion) {
                           if (parsed.area)      bodyHtml += '<p style="margin:3px 0;"><strong>Area:</strong> '       + escapeHtml(parsed.area)       + '</p>';
                           if (parsed.concerning) bodyHtml += '<p style="margin:3px 0;"><strong>Concerning:</strong> ' + escapeHtml(parsed.concerning) + '</p>';
                           if (parsed.valid)      bodyHtml += '<p style="margin:3px 0;"><strong>Valid:</strong> '      + escapeHtml(parsed.valid)      + '</p>';
@@ -817,6 +848,14 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                                   '<p style="margin:4px 0 0; font-size:0.85em; max-height:200px; overflow-y:auto; line-height:1.4;">' +
                                   escapeHtml(parsed.discussion) + '</p>' +
                               '</div>';
+                          }
+                      } else if (props._fullText) {
+                          // No structured fields - show raw full text
+                          const plainText = props._fullText.replace(/\s+/g, ' ').trim();
+                          if (plainText) {
+                              bodyHtml = '<p style="font-size:0.9em; max-height:200px; overflow-y:auto;">' +
+                                  escapeHtml(plainText.substring(0, 800)) + (plainText.length > 800 ? '…' : '') +
+                              '</p>';
                           }
                       } else {
                           // Fallback to popupinfo stripped of HTML tags
