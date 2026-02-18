@@ -235,11 +235,15 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              background-color: var(--watch-bg);
              border: 1px solid var(--watch-border);
           }
-          .warning-type.mcd {
-             background-color: var(--mcd-bg);
-             border: 1px solid var(--mcd-border);
-          }
-          .warning-type a {
+           .warning-type.mcd {
+              background-color: var(--mcd-bg);
+              border: 1px solid var(--mcd-border);
+           }
+           .warning-type.moderate {
+              background-color: #4d3510;
+              border: 1px solid #b25900;
+           }
+           .warning-type a {
              color: var(--text-color);
              text-decoration: none;
              transition: color 0.2s;
@@ -545,12 +549,16 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               const container = document.getElementById('mcd-container');
               if (!container) return;
               
+              // Update the MCD count in the header
+              const mcdCountEl = document.getElementById('mcd-count');
+              if (mcdCountEl) mcdCountEl.textContent = mesoscaleDiscussions.length;
+              
               if (mesoscaleDiscussions.length === 0) {
                   container.innerHTML = '';
                   return;
               }
               
-              let html = '<div class="warning header mcd-header" style="grid-column: 1 / -1;">' +
+              let html = '<div class="warning header mcd-header" style="grid-column: 1 / -1; margin-top: 20px;">' +
                   '<h2>Mesoscale Discussions (' + mesoscaleDiscussions.length + ')</h2>' +
                   '</div>' +
                   '<div class="warnings-container">';
@@ -1104,15 +1112,21 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
     <body>
        <h1 style="text-align: center;">Active Weather Warnings</h1>
        
-       {{ if .WarningTypeCounts }}
-       <div class="warning-types" id="top">
-          {{ range .WarningTypeCounts }}
-             <div class="warning-type{{ if eq .Priority 1 }} tornado{{ else if eq .Priority 2 }} tstorm{{ else if eq .Priority 3 }} tornado-watch{{ else if eq .Priority 4 }} watch{{ end }}">
-               <a href="#{{ .Type | urlquery }}">{{ .Type }}</a>: {{ .Count }}
-             </div>
-          {{ end }}
-       </div>
-       {{ end }}
+         {{ if .WarningTypeCounts }}
+         <div class="warning-types" id="top">
+            {{ range .WarningTypeCounts }}
+               <div class="warning-type{{ if eq .Severity "Severe" }} severe{{ else if eq .Severity "Moderate" }} moderate{{ else if eq .Severity "Extreme" }} severe{{ else if eq .Severity "Minor" }}{{ else }} watch{{ end }}">
+                 <a href="#{{ .Type | urlquery }}">{{ .Type }}</a>: {{ .Count }}
+               </div>
+            {{ end }}
+         </div>
+         {{ end }}
+        
+        <div class="warning-types">
+           <div class="warning-type" style="background-color: #00aaaa;">
+              <a href="#mcd-container">Mesoscale Discussions</a>: <span id="mcd-count">-</span>
+           </div>
+        </div>
        
        <h4>Total Warnings: {{ .Counter }}</h4>
        <h4 id="last-updated">Last updated: <span id="last-updated-time">{{ .LastUpdated }}</span></h4>
@@ -1130,8 +1144,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        <div id="list-section">
           <h2 style="margin-top: 20px;">List View</h2>
           
-          <!-- MCDs are injected here by JavaScript after NWS fetch -->
-          <div id="mcd-container"></div>
+           <!-- MCDs are injected here by JavaScript after NWS fetch -->
+           <div id="mcd-container" style="margin-bottom: 20px;"></div>
           
           {{ if eq (len .Warnings) 0 }}
              <p>No active weather warnings at this time.</p>
@@ -1250,26 +1264,33 @@ type TypeCount struct {
 	Type     string
 	Count    int
 	Priority int
+	Severity string
 }
 
-func countWarningTypes(warnings []fetcher.Warning) map[string]int {
+func countWarningTypes(warnings []fetcher.Warning) (map[string]int, map[string]string) {
 	typeCounts := make(map[string]int)
+	severityMap := make(map[string]string)
 	for _, warning := range warnings {
 		if warning.Severity != "Header" {
 			typeCounts[warning.Type]++
+			currentSev := severityMap[warning.Type]
+			if currentSev == "" || getSeverityRank(warning.Severity) > getSeverityRank(currentSev) {
+				severityMap[warning.Type] = warning.Severity
+			}
 		}
 	}
-	return typeCounts
+	return typeCounts, severityMap
 }
 
 func sortedWarningTypeCounts(warnings []fetcher.Warning) []TypeCount {
-	typeCounts := countWarningTypes(warnings)
+	typeCounts, severityMap := countWarningTypes(warnings)
 	var result []TypeCount
 	for warningType, count := range typeCounts {
 		result = append(result, TypeCount{
 			Type:     warningType,
 			Count:    count,
 			Priority: getWarningTypeRank(warningType),
+			Severity: severityMap[warningType],
 		})
 	}
 	sort.Slice(result, func(i, j int) bool {
