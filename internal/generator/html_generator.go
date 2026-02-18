@@ -256,24 +256,37 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              color: #add8e6;
              text-decoration: underline;
           }
-          .back-to-top {
-             position: fixed;
-             bottom: 20px;
-             right: 20px;
-             background-color: var(--header-bg);
-             color: var(--text-color);
-             padding: 10px 15px;
-             border-radius: 5px;
-             border: 1px solid var(--header-border);
-             cursor: pointer;
-             text-decoration: none;
-             opacity: 0.8;
-             transition: opacity 0.2s;
-          }
-          .back-to-top:hover {
-             opacity: 1;
-          }
-          h1, h2, h4 {
+           .back-to-top {
+              position: fixed;
+              bottom: 20px;
+              right: 20px;
+              background-color: var(--header-bg);
+              color: var(--text-color);
+              padding: 10px 15px;
+              border-radius: 5px;
+              border: 1px solid var(--header-border);
+              cursor: pointer;
+              text-decoration: none;
+              opacity: 0.8;
+              transition: opacity 0.2s;
+           }
+           .back-to-top:hover {
+              opacity: 1;
+           }
+           .leaflet-control-reset-map {
+              background-color: var(--header-bg);
+              color: var(--text-color);
+              padding: 8px 12px;
+              border-radius: 4px;
+              border: 1px solid var(--header-border);
+              cursor: pointer;
+              font-size: 14px;
+              font-family: Arial, sans-serif;
+           }
+           .leaflet-control-reset-map:hover {
+              background-color: var(--tab-active-bg);
+           }
+           h1, h2, h4 {
              color: var(--text-color);
           }
           .next-refresh {
@@ -553,9 +566,12 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               const container = document.getElementById('mcd-container');
               if (!container) return;
               
-              // Update the MCD count in the header
-              const mcdCountEl = document.getElementById('mcd-count');
-              if (mcdCountEl) mcdCountEl.textContent = mesoscaleDiscussions.length;
+               // Update the MCD count in the header
+               const mcdCountEl = document.getElementById('mcd-count');
+               if (mcdCountEl) mcdCountEl.textContent = mesoscaleDiscussions.length;
+               
+               const mcdTotalCountEl = document.getElementById('mcd-total-count');
+               if (mcdTotalCountEl) mcdTotalCountEl.textContent = mesoscaleDiscussions.length;
               
               if (mesoscaleDiscussions.length === 0) {
                   container.innerHTML = '';
@@ -768,26 +784,47 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               }
           }
           
-          // Initialize the Leaflet map
-          async function initMap() {
-              map = L.map('map').setView([39.8283, -98.5795], 4);
-              
-              const savedMapState = localStorage.getItem('mapState');
-              if (savedMapState) {
-                  try {
-                      const state = JSON.parse(savedMapState);
-                      map.setView([state.lat, state.lng], state.zoom);
-                  } catch (e) { /* ignore */ }
-              }
-              
-              L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-                  subdomains: 'abcd',
-                  maxZoom: 20
-              }).addTo(map);
-              
-              map.on('moveend', saveMapState);
-              map.on('zoomend', saveMapState);
+           // Initialize the Leaflet map
+           async function initMap() {
+               map = L.map('map').setView([39.8283, -98.5795], 4);
+               
+               const savedMapState = localStorage.getItem('mapState');
+               if (savedMapState) {
+                   try {
+                       const state = JSON.parse(savedMapState);
+                       map.setView([state.lat, state.lng], state.zoom);
+                   } catch (e) { /* ignore */ }
+               }
+               
+               L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                   subdomains: 'abcd',
+                   maxZoom: 20
+               }).addTo(map);
+               
+               // Add reset map button
+               const initialView = [39.8283, -98.5795];
+               const initialZoom = 4;
+               L.Control.ResetMap = L.Control.extend({
+                   onAdd: function(map) {
+                       const btn = L.DomUtil.create('button', 'leaflet-control-reset-map');
+                       btn.innerHTML = '⟲ Reset Map';
+                       btn.title = 'Reset to full US view';
+                       btn.onclick = function(e) {
+                           L.DomEvent.stopPropagation(e);
+                           map.setView(initialView, initialZoom);
+                           localStorage.removeItem('mapState');
+                       };
+                       return btn;
+                   }
+               });
+               L.control.resetMap = function(opts) {
+                   return new L.Control.ResetMap(opts);
+               };
+               L.control.resetMap({ position: 'topright' }).addTo(map);
+               
+               map.on('moveend', saveMapState);
+               map.on('zoomend', saveMapState);
 
               // Render NWS warnings immediately — no waiting on anything external
               addWarningsToMap();
@@ -1132,22 +1169,20 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
            </div>
         </div>
        
-       <h4>Total Warnings: {{ .Counter }}</h4>
-       <h4 id="last-updated">Last updated: <span id="last-updated-time">{{ .LastUpdated }}</span></h4>
+        <h4>Warnings: {{ .Counter }}</h4>
+        <h4>Mesoscale Discussions: <span id="mcd-total-count">0</span></h4>
+        <h4 id="last-updated">Last updated: <span id="last-updated-time">{{ .LastUpdated }}</span></h4>
        <div class="next-refresh">Next refresh in <span class="countdown">0:30</span></div>
        
        <!-- Map Section -->
        <div id="map-section" style="margin-bottom: 30px;">
-          <h2 style="margin-top: 20px;">Map View</h2>
           <button onclick="showDebugInfo()" style="margin-bottom: 10px; padding: 5px 10px; background-color: var(--header-bg); color: var(--text-color); border: 1px solid var(--header-border); border-radius: 3px; cursor: pointer;">Show Debug Info</button>
           <div id="debug-info" style="display: none; background-color: var(--summary-bg); padding: 10px; margin-bottom: 10px; border-radius: 5px; font-family: monospace; font-size: 0.9em; max-height: 200px; overflow-y: auto;"></div>
           <div id="map"></div>
        </div>
        
        <!-- List Section -->
-       <div id="list-section">
-          <h2 style="margin-top: 20px;">List View</h2>
-          
+       <div id="list-section">          
            <!-- MCDs are injected here by JavaScript after NWS fetch -->
            <div id="mcd-container" style="margin-bottom: 20px;"></div>
           
@@ -1201,7 +1236,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           </div>
           <div class="legend-item">
              <div class="legend-color" style="background-color: #00aaaa; border-style: dashed;"></div>
-             <span>Mesoscale Discussion (MCD) — NWS polygon</span>
+             <span>Mesoscale Discussion</span>
           </div>
           <div class="legend-item">
              <div class="legend-color" style="background-color: #a52a2a;"></div>
