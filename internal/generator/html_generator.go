@@ -67,7 +67,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              padding: 20px;
              background-color: var(--bg-color);
              color: var(--text-color);
-             /* Smooth fade-in on page load */
              animation: fadeIn 0.3s ease-in;
           }
           
@@ -76,7 +75,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              to { opacity: 1; }
           }
           
-          /* Prevent flash of white during reload */
           html {
              background-color: #121212;
           }
@@ -92,7 +90,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              border: 2px solid var(--card-border);
              border-radius: 5px;
              margin-top: 20px;
-             /* Smooth appearance */
              opacity: 1;
              transition: opacity 0.2s ease-in-out;
           }
@@ -165,7 +162,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           .warning.header {
              background-color: var(--header-bg);
              border-color: var(--header-border);
-             grid-column: 1 / -1; /* Make headers span full width */
+             grid-column: 1 / -1;
              margin-top: 15px;
              margin-bottom: 5px;
              padding: 2px 10px;
@@ -187,6 +184,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           .warning.header.tstorm-header {
              background-color: var(--tstorm-bg);
              border-color: var(--tstorm-border);
+          }
+          .warning.header.mcd-header {
+             background-color: var(--mcd-bg);
+             border-color: var(--mcd-border);
           }
           .warning.header h2 {
              margin: 5px 0;
@@ -287,6 +288,15 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           .expiration-countdown.warning {
              color: var(--countdown-caution);
           }
+          .mcd-description {
+             font-size: 0.85em;
+             color: #aaa;
+             margin-top: 8px;
+             max-height: 80px;
+             overflow-y: auto;
+             border-top: 1px solid var(--mcd-border);
+             padding-top: 6px;
+          }
           @media (max-width: 768px) {
              .warnings-container {
                 grid-template-columns: 1fr;
@@ -296,85 +306,174 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        <script>
           let map;
           let warningsData = {{ .WarningsJSON }};
-          let countyBoundaries = null; // Will store county boundary data
-          let warningLayers = []; // Track all warning layers for cleanup
-          let mesoscaleDiscussions = []; // Store mesoscale discussions
-          let updateInterval = 30000; // 30 seconds in milliseconds
+          let countyBoundaries = null;
+          let warningLayers = [];
+          let mesoscaleDiscussions = [];
+          let updateInterval = 30000;
           let lastUpdateTime = Date.now();
           
-          // Fetch mesoscale discussions from SPC
+          // ---------------------------------------------------------------
+          // Fetch Mesoscale Discussions from the NOAA ArcGIS MapServer,
+          // then scrape the full text from each SPC product page via the
+          // allorigins CORS proxy.
+          //
+          // Key fix: ArcGIS returns 3D coordinates [lng, lat, z]. Leaflet
+          // only handles 2D, so we strip the Z value before drawing.
+          // ---------------------------------------------------------------
           async function fetchMesoscaleDiscussions() {
               try {
-                  // IEM endpoint — returns recent MCDs, we filter to active ones below
-                  const url = 'https://mesonet.agron.iastate.edu/geojson/spc_mcd.geojson';
-                  const response = await fetch(url + '?ts=' + Date.now());
-
-                  if (!response.ok) {
-                      throw new Error('IEM MCD fetch failed: ' + response.status);
-                  }
-
-                  const data = await response.json();
-                  const now = new Date();
-
-                  // Log raw properties from first feature so we can see field names/formats
-                  if (data.features && data.features.length > 0) {
-                      console.log('IEM MCD sample properties:', JSON.stringify(data.features[0].properties));
-                  }
-
-                  const active = (data.features || []).filter(feature => {
-                      const p = feature.properties || {};
-
-                      const rawExpire = p.expire ?? p.expiration ?? p.expires ?? p.valid_end ?? null;
-                      const rawIssue = p.issue ?? p.issued ?? p.issueTime ?? null;
-
-                      if (rawExpire) {
-                          const expireDate = new Date(rawExpire);
-                          if (!isNaN(expireDate.getTime())) {
-                              if (expireDate > now) {
-                                  return true;
-                              } else {
-                                  console.log('Filtering expired MCD', p.year, p.num, '— expired', rawExpire);
-                                  return false;
-                              }
-                          }
-                      }
-
-                      if (rawIssue) {
-                          const issueDate = new Date(rawIssue);
-                          if (!isNaN(issueDate.getTime())) {
-                              const hoursSinceIssue = (now - issueDate) / (1000 * 60 * 60);
-                              if (hoursSinceIssue <= 8) {
-                                  return true;
-                              } else {
-                                  console.log('Filtering stale MCD', p.year, p.num, '— issued', hoursSinceIssue.toFixed(1), 'hours ago');
-                                  return false;
-                              }
-                          }
-                      }
-
-                      console.log('Filtering MCD with no valid expire/issue time:', JSON.stringify(p));
-                      return false;
+                  // Step 1 — get active MCD polygons + metadata from NOAA MapServer
+                  const base = 'https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/spc_mesoscale_discussion/MapServer/0/query';
+                  const params = new URLSearchParams({
+                      where:     '1=1',
+                      outFields: 'name,folderpath,popupinfo,idp_filedate',
+                      f:         'geojson',
+                      _:         Date.now()
                   });
 
-                  console.log('MCDs fetched:', (data.features || []).length, '— active after filter:', active.length);
-                  return active;
+                  const response = await fetch(base + '?' + params);
+                  if (!response.ok) throw new Error('SPC MapServer fetch failed: ' + response.status);
+
+                  const data     = await response.json();
+                  const features = (data.features || []).filter(f => f.geometry && f.geometry.coordinates);
+                  console.log('SPC MapServer MCDs (active):', features.length);
+
+                  // Strip Z coordinate from all geometries so Leaflet can draw them.
+                  // ArcGIS returns [lng, lat, z] triplets; Leaflet needs [lng, lat] pairs.
+                  features.forEach(feature => {
+                      feature.geometry = stripZ(feature.geometry);
+                  });
+
+                  // Step 2 — scrape full discussion text from each SPC HTML page in parallel
+                  await Promise.all(features.map(async (feature) => {
+                      const props  = feature.properties || {};
+                      const mcdNum = extractMCDNumber(props);
+                      const spcUrl = mcdSPCLink(mcdNum);
+                      try {
+                          const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(spcUrl);
+                          const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+                          if (!r.ok) throw new Error('proxy HTTP ' + r.status);
+
+                          const json  = await r.json();
+                          const html  = json.contents || '';
+                          // SPC page has exactly one <pre> containing the raw discussion text
+                          const preMatch = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+                          if (preMatch) {
+                              feature.properties._fullText = preMatch[1]
+                                  .replace(/<[^>]+>/g, '')
+                                  .replace(/&amp;/g,  '&')
+                                  .replace(/&lt;/g,   '<')
+                                  .replace(/&gt;/g,   '>')
+                                  .replace(/&nbsp;/g, ' ')
+                                  .trim();
+                              console.log('MCD #' + mcdNum + ' text scraped (' + feature.properties._fullText.length + ' chars)');
+                          } else {
+                              console.warn('MCD #' + mcdNum + ': no <pre> tag found in SPC page');
+                          }
+                      } catch (e) {
+                          console.warn('MCD #' + mcdNum + ' scrape failed:', e.message);
+                      }
+                  }));
+
+                  return features;
 
               } catch (error) {
-                  console.error('Error fetching mesoscale discussions:', error);
+                  console.error('Error fetching SPC MCDs:', error);
                   return [];
               }
+          }
+
+          // Strip Z (elevation) values from ArcGIS GeoJSON geometry.
+          // ArcGIS encodes coordinates as [lng, lat, z]; Leaflet needs [lng, lat].
+          function stripZ(geometry) {
+              if (!geometry) return geometry;
+              const strip2D = coords => coords.map(c => [c[0], c[1]]);
+              switch (geometry.type) {
+                  case 'Polygon':
+                      return { type: 'Polygon', coordinates: geometry.coordinates.map(strip2D) };
+                  case 'MultiPolygon':
+                      return { type: 'MultiPolygon', coordinates: geometry.coordinates.map(ring => ring.map(strip2D)) };
+                  default:
+                      return geometry;
+              }
+          }
+
+          // The 'name' field from the MapServer IS the MCD number (e.g. "421" or "0421").
+          // The MapServer 'name' field may come back as "MD 0091" or "0091".
+          // Strip any non-digit characters before zero-padding to get a clean number.
+          function extractMCDNumber(props) {
+              if (!props.name) return '????';
+              const digits = String(props.name).replace(/[^0-9]/g, '');
+              return digits ? digits.padStart(4, '0') : '????';
+          }
+
+          // ArcGIS dates are Unix milliseconds; convert to a locale string.
+          function formatArcGISDate(msTimestamp) {
+              if (!msTimestamp && msTimestamp !== 0) return 'Not specified';
+              return new Date(msTimestamp).toLocaleString();
+          }
+
+          // Build the SPC product page URL for a given zero-padded MCD number.
+          function mcdSPCLink(mcdNum) {
+              const year = new Date().getFullYear();
+              return 'https://www.spc.noaa.gov/products/md/' + year + '/md' + mcdNum + '.html';
+          }
+
+          // Parse the raw SPC <pre> text into labelled sections.
+          //
+          // SPC MCD text format:
+          //   MESOSCALE DISCUSSION 0421
+          //   NWS STORM PREDICTION CENTER NORMAN OK
+          //   ...
+          //   AREA AFFECTED...PORTIONS OF CENTRAL TX AND SOUTHWEST OK
+          //   CONCERNING...SEVERE THUNDERSTORM WATCH ISSUANCE
+          //   VALID 172015Z - 172215Z
+          //
+          //   SUMMARY...
+          //   Thunderstorm activity is expected to increase...
+          //
+          //   DISCUSSION...
+          //   A well-defined shortwave trough...
+          //
+          //   ..Forecaster Name.. DD/HHMM UTC
+          function parseMCDText(rawText) {
+              if (!rawText) return { area: '', concerning: '', valid: '', summary: '', discussion: '', raw: '' };
+
+              const startIdx = rawText.indexOf('MESOSCALE DISCUSSION');
+              const text = startIdx >= 0 ? rawText.substring(startIdx) : rawText;
+
+              // Grab single-line value after LABEL...
+              const getInline = (label) => {
+                  const re = new RegExp(label + '\\.{3}(.+)', 'i');
+                  const m  = text.match(re);
+                  return m ? m[1].trim() : '';
+              };
+
+              // Grab multi-line block after LABEL...\n until next ALL-CAPS... header or ..sig
+              const getBlock = (label) => {
+                  const re = new RegExp(label + '\\.{3}\\s*\\n([\\s\\S]*?)(?=\\n[A-Z][A-Z .]{2,}\\.{3}|\\n\\.\\.)', 'i');
+                  const m  = text.match(re);
+                  return m ? m[1].replace(/\s+/g, ' ').trim() : '';
+              };
+
+              return {
+                  area:       getInline('AREA AFFECTED'),
+                  concerning: getInline('CONCERNING'),
+                  valid:      getInline('VALID'),
+                  summary:    getBlock('SUMMARY'),
+                  discussion: getBlock('DISCUSSION'),
+                  raw:        text
+              };
           }
           
           // Load county boundaries from NWS GeoJSON
           async function loadCountyBoundaries() {
               try {
-                  // Using simplified US counties GeoJSON from a CDN
                   const response = await fetch('https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json');
                   countyBoundaries = await response.json();
                   console.log('County boundaries loaded successfully');
               } catch (error) {
                   console.error('Failed to load county boundaries:', error);
-                  console.log('County fallback will not be available');
               }
           }
           
@@ -391,37 +490,30 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           // Fetch updated warnings data
           async function fetchUpdatedWarnings() {
               try {
-                  // Fetch the JSON data file (assumes it's in the same directory as the HTML)
                   const response = await fetch(window.location.href.replace('.html', '.json') + '?t=' + Date.now());
-                  if (!response.ok) {
-                      throw new Error('Failed to fetch updates');
-                  }
+                  if (!response.ok) throw new Error('Failed to fetch updates');
                   
                   const data = await response.json();
                   
-                  // Check if data is newer than what we have
                   if (data.updatedAtUTC && data.updatedAtUTC * 1000 > lastUpdateTime) {
                       console.log('New data available, updating...');
                       lastUpdateTime = data.updatedAtUTC * 1000;
-                      
-                      // Update warnings data
                       warningsData = data.warnings;
-                      
-                      // Update the statistics
                       updateStats(data);
-                      
-                      // Fetch updated mesoscale discussions
-                      mesoscaleDiscussions = await fetchMesoscaleDiscussions();
-                      
-                      // Clear old map layers and redraw
+
+                      // Redraw NWS warning polygons immediately
                       clearWarningLayers();
-                      addMesoscaleDiscussionsToMap();
-                      addMesoscaleDiscussionsToList();
                       addWarningsToMap();
-                      
-                      // Update the list view
                       updateListView(data.warnings);
-                      
+
+                      // Reload MCDs independently in background
+                      fetchMesoscaleDiscussions().then(features => {
+                          mesoscaleDiscussions = features;
+                          addMesoscaleDiscussionsToMap();
+                          addMesoscaleDiscussionsToList();
+                          enrichMCDsWithText();
+                      });
+
                       console.log('Update complete');
                   } else {
                       console.log('No new data available');
@@ -433,12 +525,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           
           // Update statistics display
           function updateStats(data) {
-              // Update last updated time with local timezone
-              if (data.updatedAtUTC) {
-                  updateLastUpdatedTime(data.updatedAtUTC);
-              }
-              
-              // Update total warnings count
+              if (data.updatedAtUTC) updateLastUpdatedTime(data.updatedAtUTC);
               const statsElements = document.querySelectorAll('h4');
               statsElements.forEach(el => {
                   if (el.textContent.includes('Total Warnings:')) {
@@ -447,7 +534,11 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               });
           }
           
-          // Add mesoscale discussions to the list view
+          // ------------------------------------------------------------------
+          // Render MCD cards into the #mcd-container list section.
+          // Shows: MCD number, issued time, area, concerning, valid period,
+          // summary text, and a link to the full SPC discussion.
+          // ------------------------------------------------------------------
           function addMesoscaleDiscussionsToList() {
               const container = document.getElementById('mcd-container');
               if (!container) return;
@@ -457,43 +548,74 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   return;
               }
               
-              let html = '<div class="warning header" style="background-color: var(--mcd-bg); border-color: var(--mcd-border); grid-column: 1 / -1; margin-top: 15px; margin-bottom: 5px; padding: 2px 10px; border-width: 2px;">' +
-                  '<h2 style="margin: 5px 0; text-align: center; font-size: 1.2em;">Mesoscale Discussions</h2>' +
+              let html = '<div class="warning header mcd-header" style="grid-column: 1 / -1;">' +
+                  '<h2>Mesoscale Discussions (' + mesoscaleDiscussions.length + ')</h2>' +
                   '</div>' +
                   '<div class="warnings-container">';
               
               mesoscaleDiscussions.forEach((mcd, index) => {
-                  const props     = mcd.properties || {};
-                  const mcdNum    = props.num  ? String(props.num).padStart(4, '0') : (index + 1);
-                  const year      = props.year || new Date().getFullYear();
-                  const concerning = props.concerning || '';
-                  const issued    = props.issue  || '';
-                  const expires   = props.expire || '';
-                  const spcUrl    = props.year && props.num
-                      ? 'https://www.spc.noaa.gov/products/md/' + year + '/md' + String(props.num).padStart(4,'0') + '.html'
-                      : '';
-                  
-                  html += '<div class="warning mcd">' +
-                      '<div class="warning-header">' +
-                      '<h2 class="warning-title" style="cursor: pointer;" onclick="zoomToMCD(' + index + ')">Mesoscale Discussion ' + mcdNum + '</h2>' +
-                      '<strong>SPC MCD</strong>' +
+                  const props   = mcd.properties || {};
+                  const mcdNum  = extractMCDNumber(props);
+                  const issued  = props.idp_filedate ? formatArcGISDate(props.idp_filedate) : 'Not specified';
+                  const spcUrl  = mcdSPCLink(mcdNum);
+                  const parsed  = parseMCDText(props._fullText || '');
+
+                  html += '<div class="warning mcd">';
+                  html += '<div class="warning-header">' +
+                      '<h2 class="warning-title" style="cursor:pointer;" onclick="zoomToMCD(' + index + ')">' +
+                          'MCD #' + mcdNum +
+                      '</h2>' +
+                      '<strong>SPC</strong>' +
+                  '</div>';
+
+                  html += '<small><strong>Issued:</strong> ' + escapeHtml(issued) + '</small>';
+
+                  if (parsed.area) {
+                      html += '<p style="margin:6px 0 2px;"><strong>Area:</strong> ' + escapeHtml(parsed.area) + '</p>';
+                  }
+                  if (parsed.concerning) {
+                      html += '<p style="margin:2px 0;"><strong>Concerning:</strong> ' + escapeHtml(parsed.concerning) + '</p>';
+                  }
+                  if (parsed.valid) {
+                      html += '<p style="margin:2px 0;"><strong>Valid:</strong> ' + escapeHtml(parsed.valid) + '</p>';
+                  }
+                  if (parsed.summary) {
+                      html += '<div class="mcd-description" style="max-height:120px;">' +
+                          '<strong>Summary:</strong> ' + escapeHtml(parsed.summary) +
                       '</div>';
-                  
-                  if (concerning) html += '<p><strong>Concerning:</strong> ' + concerning + '</p>';
-                  if (issued)     html += '<small>Issued: '  + formatTime(issued)  + '</small><br>';
-                  if (expires)    html += '<small>Expires: ' + formatTime(expires) + '</small>';
-                  if (spcUrl)     html += '<br><small><a href="' + spcUrl + '" target="_blank" style="color: #00aaaa;">View full discussion ↗</a></small>';
-                  
+                  } else if (!parsed.area && !parsed.concerning) {
+                      // No structured text available yet — show raw popupinfo snippet
+                      const rawPopup  = props.popupinfo || '';
+                      const plainText = rawPopup.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                      if (plainText) {
+                          html += '<div class="mcd-description">' +
+                              escapeHtml(plainText.substring(0, 300)) + (plainText.length > 300 ? '…' : '') +
+                          '</div>';
+                      }
+                  }
+
+                  html += '<div style="margin-top:8px;">' +
+                      '<small><a href="' + spcUrl + '" target="_blank" style="color:#00aaaa;">View full discussion on SPC ↗</a></small>' +
+                  '</div>';
                   html += '</div>';
               });
               
               html += '</div>';
               container.innerHTML = html;
+              updateAllExpirationCountdowns();
+          }
+
+          // Simple HTML escaper to avoid XSS in dynamic content
+          function escapeHtml(str) {
+              return String(str)
+                  .replace(/&/g, '&amp;')
+                  .replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;')
+                  .replace(/"/g, '&quot;');
           }
           
           // Zoom to a specific MCD on the map
           function zoomToMCD(index) {
-              // Scroll to map first
               document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'center' });
               
               const mcd = mesoscaleDiscussions[index];
@@ -503,21 +625,17 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               }
               
               try {
-                  // Calculate bounds from geometry
                   let bounds;
                   if (mcd.geometry.type === 'Polygon') {
                       const coords = mcd.geometry.coordinates[0];
-                      const latLngs = coords.map(coord => [coord[1], coord[0]]);
-                      bounds = L.latLngBounds(latLngs);
+                      bounds = L.latLngBounds(coords.map(c => [c[1], c[0]]));
                   } else if (mcd.geometry.type === 'MultiPolygon') {
-                      const coords = mcd.geometry.coordinates[0][0];
-                      const latLngs = coords.map(coord => [coord[1], coord[0]]);
-                      bounds = L.latLngBounds(latLngs);
+                      const allCoords = mcd.geometry.coordinates.flat(1);
+                      bounds = L.latLngBounds(allCoords.map(c => [c[1], c[0]]));
                   }
                   
-                  if (bounds) {
+                  if (bounds && bounds.isValid()) {
                       map.fitBounds(bounds, { padding: [50, 50] });
-                      console.log('Zoomed to MCD', index);
                   }
               } catch (error) {
                   console.error('Error zooming to MCD:', error);
@@ -526,241 +644,216 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           
           // Update the list view with new warnings
           function updateListView(warnings) {
-              // This is a simplified update - in a full implementation you might want to
-              // preserve scroll position, open popups, etc.
-              // For now, we'll just let the user manually refresh the page if they want the full list rebuilt
               console.log('List view update - ' + warnings.length + ' warnings');
-              // The list will be fully rebuilt on next page load
-              // We're primarily updating the map here for real-time tracking
           }
           
           // Format timestamp to user's local time
           function formatLocalTime(timestamp) {
-              const date = new Date(timestamp * 1000); // Convert Unix timestamp to milliseconds
-              
-              // Format with user's locale and timezone
-              const options = {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric',
-                  hour: 'numeric',
-                  minute: '2-digit',
-                  second: '2-digit',
+              const date = new Date(timestamp * 1000);
+              return date.toLocaleString(undefined, {
+                  year: 'numeric', month: 'short', day: 'numeric',
+                  hour: 'numeric', minute: '2-digit', second: '2-digit',
                   timeZoneName: 'short'
-              };
-              
-              return date.toLocaleString(undefined, options);
+              });
           }
           
-          // Update the last updated time display
           function updateLastUpdatedTime(timestamp) {
-              const timeElement = document.getElementById('last-updated-time');
-              if (timeElement && timestamp) {
-                  timeElement.textContent = formatLocalTime(timestamp);
-              }
+              const el = document.getElementById('last-updated-time');
+              if (el && timestamp) el.textContent = formatLocalTime(timestamp);
           }
           
-          // Display countdown to next refresh
           window.onload = function() {
-              // Initialize map immediately since it's always visible
               initMap();
               
-              // Update the last updated time to local timezone on initial load
               const initialTimestamp = {{ .UpdatedAtUTC }};
-              if (initialTimestamp) {
-                  updateLastUpdatedTime(initialTimestamp);
-              }
+              if (initialTimestamp) updateLastUpdatedTime(initialTimestamp);
               
-              // Set up refresh countdown
-              let refreshTime = 30; // 30 seconds
+              let refreshTime = 30;
               const countdownElements = document.querySelectorAll('.countdown');
               
-              const countdownTimer = setInterval(function() {
+              setInterval(function() {
                   refreshTime--;
                   const minutes = Math.floor(refreshTime / 60);
                   const seconds = refreshTime % 60;
                   const timeString = minutes + ':' + (seconds < 10 ? '0' : '') + seconds;
-                  
-                  countdownElements.forEach(function(element) {
-                      element.textContent = timeString;
-                  });
-                  
+                  countdownElements.forEach(el => el.textContent = timeString);
                   if (refreshTime <= 0) {
-                      countdownElements.forEach(function(element) {
-                          element.textContent = "Updating...";
-                      });
-                      refreshTime = 30; // Reset for next cycle
+                      countdownElements.forEach(el => el.textContent = "Updating...");
+                      refreshTime = 30;
                   }
               }, 1000);
               
-              // Start periodic updates (every 30 seconds)
               setInterval(fetchUpdatedWarnings, updateInterval);
               
-              // Show/hide back-to-top button based on scroll position
               const backToTopButton = document.querySelector('.back-to-top');
               window.addEventListener('scroll', function() {
-                  if (window.scrollY > 300) {
-                      backToTopButton.style.display = 'block';
-                  } else {
-                      backToTopButton.style.display = 'none';
-                  }
+                  backToTopButton.style.display = window.scrollY > 300 ? 'block' : 'none';
               });
+              if (window.scrollY <= 300) backToTopButton.style.display = 'none';
               
-              // Initially hide the button if at the top
-              if (window.scrollY <= 300) {
-                  backToTopButton.style.display = 'none';
-              }
-              
-              // Initialize expiration countdowns
               updateAllExpirationCountdowns();
-              
-              // Update expiration countdowns every second
               setInterval(updateAllExpirationCountdowns, 1000);
           }
           
-          // Zoom to a specific warning on the map
+          // Zoom to a specific NWS warning on the map
           function zoomToWarning(warningId) {
-              // Scroll to map first
               document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'center' });
               
-              // Find the warning in our data
               const warning = warningsData.find(w => w.id === warningId);
-              if (!warning) {
-                  console.log('Warning not found:', warningId);
-                  return;
-              }
+              if (!warning) return;
               
-              // Find the corresponding polygon layer
               const layer = warningLayers.find(layer => {
-                  // Check if this layer corresponds to our warning
                   if (layer._popup && layer._popup._content) {
-                      return layer._popup._content.includes(warning.type) && 
+                      return layer._popup._content.includes(warning.type) &&
                              layer._popup._content.includes(warning.area);
                   }
                   return false;
               });
               
               if (layer && layer.getBounds) {
-                  // Zoom to the polygon
                   map.fitBounds(layer.getBounds(), { padding: [50, 50] });
-                  
-                  // Open the popup after a short delay
-                  setTimeout(function() {
-                      layer.openPopup();
-                  }, 500);
+                  setTimeout(() => layer.openPopup(), 500);
               } else if (warning.geometry && warning.geometry.coordinates) {
-                  // Fallback: calculate bounds from coordinates
                   try {
-                      const coords = warning.geometry.type === 'Polygon' 
-                          ? warning.geometry.coordinates[0] 
+                      const coords = warning.geometry.type === 'Polygon'
+                          ? warning.geometry.coordinates[0]
                           : warning.geometry.coordinates[0][0];
-                      
-                      const latLngs = coords.map(coord => [coord[1], coord[0]]);
-                      const bounds = L.latLngBounds(latLngs);
-                      map.fitBounds(bounds, { padding: [50, 50] });
-                  } catch (error) {
-                      console.error('Error zooming to warning:', error);
+                      map.fitBounds(L.latLngBounds(coords.map(c => [c[1], c[0]])), { padding: [50, 50] });
+                  } catch (e) {
+                      console.error('Error zooming to warning:', e);
                   }
               }
           }
           
-          // Initialize the map
+          // Initialize the Leaflet map
           async function initMap() {
-              // Create map centered on continental US
               map = L.map('map').setView([39.8283, -98.5795], 4);
               
-              // Restore saved map position if available
               const savedMapState = localStorage.getItem('mapState');
               if (savedMapState) {
                   try {
                       const state = JSON.parse(savedMapState);
                       map.setView([state.lat, state.lng], state.zoom);
-                  } catch (e) {
-                      console.log('Could not restore map state:', e);
-                  }
+                  } catch (e) { /* ignore */ }
               }
               
-              // Add OpenStreetMap tile layer with dark theme
               L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
                   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                   subdomains: 'abcd',
                   maxZoom: 20
               }).addTo(map);
               
-              // Save map state whenever user moves or zooms
               map.on('moveend', saveMapState);
               map.on('zoomend', saveMapState);
-              
-              // Load county boundaries if not already loaded
-              if (!countyBoundaries) {
-                  await loadCountyBoundaries();
-              }
-              
-              // Fetch and add mesoscale discussions
-              mesoscaleDiscussions = await fetchMesoscaleDiscussions();
-              addMesoscaleDiscussionsToMap();
-              addMesoscaleDiscussionsToList();
-              
-              // Add warnings to map
+
+              // Render NWS warnings immediately — no waiting on anything external
               addWarningsToMap();
+
+              // Load MCDs and county boundaries in parallel, each independent.
+              // Neither blocks the other or the warnings already on screen.
+              fetchMesoscaleDiscussions().then(features => {
+                  mesoscaleDiscussions = features;
+                  addMesoscaleDiscussionsToMap();
+                  addMesoscaleDiscussionsToList();
+                  // Backfill text in background — updates cards/popups in-place as each finishes
+                  enrichMCDsWithText();
+              });
+
+              loadCountyBoundaries();
           }
           
-          // Save current map state to localStorage
           function saveMapState() {
               const center = map.getCenter();
-              const zoom = map.getZoom();
-              const state = {
-                  lat: center.lat,
-                  lng: center.lng,
-                  zoom: zoom
-              };
-              localStorage.setItem('mapState', JSON.stringify(state));
+              localStorage.setItem('mapState', JSON.stringify({ lat: center.lat, lng: center.lng, zoom: map.getZoom() }));
           }
           
-          // Add mesoscale discussions to the map
+          // ------------------------------------------------------------------
+          // Draw all active MCDs on the map using the exact SPC polygon geometry
+          // returned by the NOAA ArcGIS MapServer. Popup shows structured
+          // discussion text (area, concerning, valid, summary, discussion body).
+          // ------------------------------------------------------------------
           function addMesoscaleDiscussionsToMap() {
-              if (mesoscaleDiscussions.length === 0) {
-                  return;
-              }
+              if (mesoscaleDiscussions.length === 0) return;
               
               mesoscaleDiscussions.forEach((mcd, index) => {
                   if (!mcd.geometry) return;
                   
                   try {
+                      const props  = mcd.properties || {};
+                      const mcdNum = extractMCDNumber(props);
+                      const issued = props.idp_filedate ? formatArcGISDate(props.idp_filedate) : 'Not specified';
+                      const spcUrl = mcdSPCLink(mcdNum);
+                      const parsed = parseMCDText(props._fullText || '');
+
                       const geoJsonLayer = L.geoJSON(mcd, {
                           style: {
                               color: '#00aaaa',
                               fillColor: '#00aaaa',
-                              fillOpacity: 0.2,
+                              fillOpacity: 0.15,
                               weight: 2,
-                              opacity: 0.8,
+                              opacity: 0.9,
                               dashArray: '10, 5'
                           }
                       }).addTo(map);
                       
                       warningLayers.push(geoJsonLayer);
-                      
-                      // IEM fields: year, num, issue, expire, watch_confidence, concerning
-                      const props = mcd.properties || {};
-                      const mcdNum  = props.num  ? String(props.num).padStart(4, '0') : (index + 1);
-                      const year    = props.year  || new Date().getFullYear();
-                      const concerning = props.concerning || '';
-                      const issued  = props.issue  || '';
-                      const expires = props.expire || '';
-                      const spcUrl  = props.year && props.num
-                          ? 'https://www.spc.noaa.gov/products/md/' + year + '/md' + String(props.num).padStart(4,'0') + '.html'
-                          : '';
-                      
-                      const popupContent = '<div style="color: #000; min-width: 250px; max-width: 400px;">' +
-                          '<h3 style="margin-top: 0;">Mesoscale Discussion ' + mcdNum + '</h3>' +
-                          (concerning ? '<p><strong>Concerning:</strong> ' + concerning + '</p>' : '') +
-                          (issued  ? '<p><strong>Issued:</strong> '  + formatTime(issued)  + '</p>' : '') +
-                          (expires ? '<p><strong>Expires:</strong> ' + formatTime(expires) + '</p>' : '') +
-                          (spcUrl  ? '<p><a href="' + spcUrl + '" target="_blank">View full discussion ↗</a></p>' : '') +
+
+                      // Build popup — prefer parsed structured fields, fall back to popupinfo snippet
+                      let bodyHtml = '';
+                      if (parsed.area || parsed.concerning || parsed.summary) {
+                          if (parsed.area)      bodyHtml += '<p style="margin:3px 0;"><strong>Area:</strong> '       + escapeHtml(parsed.area)       + '</p>';
+                          if (parsed.concerning) bodyHtml += '<p style="margin:3px 0;"><strong>Concerning:</strong> ' + escapeHtml(parsed.concerning) + '</p>';
+                          if (parsed.valid)      bodyHtml += '<p style="margin:3px 0;"><strong>Valid:</strong> '      + escapeHtml(parsed.valid)      + '</p>';
+                          if (parsed.summary) {
+                              bodyHtml += '<div style="margin-top:8px; padding-top:8px; border-top:1px solid #ccc;">' +
+                                  '<strong>Summary:</strong>' +
+                                  '<p style="margin:4px 0 0; font-size:0.9em; max-height:160px; overflow-y:auto; line-height:1.4;">' +
+                                  escapeHtml(parsed.summary) + '</p>' +
+                              '</div>';
+                          }
+                          if (parsed.discussion) {
+                              bodyHtml += '<div style="margin-top:8px; padding-top:8px; border-top:1px solid #ccc;">' +
+                                  '<strong>Discussion:</strong>' +
+                                  '<p style="margin:4px 0 0; font-size:0.85em; max-height:200px; overflow-y:auto; line-height:1.4;">' +
+                                  escapeHtml(parsed.discussion) + '</p>' +
+                              '</div>';
+                          }
+                      } else {
+                          // Fallback to popupinfo stripped of HTML tags
+                          const rawPopup  = props.popupinfo || '';
+                          const plainText = rawPopup.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                          if (plainText) {
+                              bodyHtml = '<p style="font-size:0.9em; max-height:200px; overflow-y:auto;">' +
+                                  escapeHtml(plainText.substring(0, 800)) + (plainText.length > 800 ? '…' : '') +
+                              '</p>';
+                          }
+                      }
+
+                      const popupContent =
+                          '<div style="color:#000; min-width:260px; max-width:460px;">' +
+                          '<h3 style="margin-top:0; margin-bottom:6px; color:#006666;">MCD #' + mcdNum + '</h3>' +
+                          '<p style="margin:3px 0;"><strong>Source:</strong> Storm Prediction Center</p>' +
+                          '<p style="margin:3px 0;"><strong>Issued:</strong> ' + escapeHtml(issued) + '</p>' +
+                          bodyHtml +
+                          '<p style="margin-top:10px; padding-top:8px; border-top:1px solid #ccc;">' +
+                          '<a href="' + spcUrl + '" target="_blank" style="color:#006666; font-weight:bold;">View full discussion on SPC ↗</a>' +
+                          '</p>' +
                           '</div>';
                       
-                      geoJsonLayer.bindPopup(popupContent, { maxWidth: 400 });
-                      geoJsonLayer.bindTooltip('MCD ' + mcdNum + (concerning ? ' – ' + concerning : ''), { sticky: true });
+                      geoJsonLayer.bindPopup(popupContent, { maxWidth: 480, maxHeight: 500 });
+
+                      // Tooltip shows a one-liner of what the MCD is about
+                      const tooltipText = 'MCD #' + mcdNum +
+                          (parsed.concerning ? ' — ' + parsed.concerning : '') +
+                          (parsed.area ? ' (' + parsed.area.substring(0, 60) + (parsed.area.length > 60 ? '…' : '') + ')' : '');
+                      geoJsonLayer.bindTooltip(tooltipText, { sticky: true });
+
+                      geoJsonLayer.on('mouseover', function(e) {
+                          e.target.setStyle({ fillOpacity: 0.3, weight: 3 });
+                      });
+                      geoJsonLayer.on('mouseout', function(e) {
+                          e.target.setStyle({ fillOpacity: 0.15, weight: 2 });
+                      });
                       
                   } catch (error) {
                       console.error('Error adding MCD to map:', error);
@@ -771,117 +864,58 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           // Get color based on warning type
           function getWarningColor(warningType, severity) {
               const lowerType = warningType ? warningType.toLowerCase() : '';
-              
-              if (lowerType.includes('tornado warning')) {
-                  return '#ff69b4'; // Pink for tornado warnings
-              } else if (lowerType.includes('tornado') && lowerType.includes('watch')) {
-                  return '#ffff00'; // Yellow for tornado watch
-              } else if (lowerType.includes('thunderstorm warning') || 
-                         lowerType.includes('t-storm warning') || 
-                         lowerType.includes('tstorm warning')) {
-                  return '#ff0000'; // Red for severe thunderstorm warning
-              } else if ((lowerType.includes('thunderstorm') || 
-                         lowerType.includes('t-storm') || 
-                         lowerType.includes('tstorm')) && 
-                         lowerType.includes('watch')) {
-                  return '#aaaa00'; // Dark yellow for thunderstorm watch
-              } else if (severity === 'Severe' || severity === 'Extreme') {
-                  return '#a52a2a'; // Brown for other severe warnings
-              } else if (severity === 'Moderate') {
-                  return '#b25900'; // Orange for moderate warnings
-              } else {
-                  return '#666666'; // Gray for other warnings
-              }
+              if (lowerType.includes('tornado warning')) return '#ff69b4';
+              if (lowerType.includes('tornado') && lowerType.includes('watch')) return '#ffff00';
+              if (lowerType.includes('thunderstorm warning') || lowerType.includes('t-storm warning') || lowerType.includes('tstorm warning')) return '#ff0000';
+              if ((lowerType.includes('thunderstorm') || lowerType.includes('t-storm') || lowerType.includes('tstorm')) && lowerType.includes('watch')) return '#aaaa00';
+              if (severity === 'Severe' || severity === 'Extreme') return '#a52a2a';
+              if (severity === 'Moderate') return '#b25900';
+              return '#666666';
           }
           
-          // Add warnings to the map
+          // Add NWS warnings to the map
           function addWarningsToMap() {
-              let addedCount = 0;
-              let skippedCount = 0;
-              let countyFallbackCount = 0;
-              
+              let addedCount = 0, skippedCount = 0, countyFallbackCount = 0;
               console.log('Total warnings data:', warningsData.length);
               
-              // Filter out warnings without geometry first
               const validWarnings = warningsData.filter(warning => {
-                  // Skip header entries or undefined warnings
                   if (!warning || warning.severity === 'Header') return false;
-                  
-                  // Must have geometry or SAME codes for county fallback
-                  return (warning.geometry && warning.geometry.type) || 
+                  return (warning.geometry && warning.geometry.type) ||
                          (warning.same && warning.same.length > 0 && countyBoundaries);
               });
               
               console.log('Valid warnings to display:', validWarnings.length);
               
-              // Sort warnings by priority (similar to alerts.js order)
-              const warningOrder = [
-                  'tornado warning',
-                  'severe thunderstorm warning',
-                  'tornado watch',
-                  'severe thunderstorm watch',
-                  'other'
-              ];
-              
+              const warningOrder = ['tornado warning','severe thunderstorm warning','tornado watch','severe thunderstorm watch','other'];
               validWarnings.sort((a, b) => {
                   const aType = (a.type || '').toLowerCase();
                   const bType = (b.type || '').toLowerCase();
-                  
-                  let aIndex = warningOrder.length - 1; // default to 'other'
-                  let bIndex = warningOrder.length - 1;
-                  
+                  let aIdx = warningOrder.length - 1, bIdx = warningOrder.length - 1;
                   for (let i = 0; i < warningOrder.length - 1; i++) {
-                      if (aType.includes(warningOrder[i])) aIndex = i;
-                      if (bType.includes(warningOrder[i])) bIndex = i;
+                      if (aType.includes(warningOrder[i])) aIdx = i;
+                      if (bType.includes(warningOrder[i])) bIdx = i;
                   }
-                  
-                  if (aIndex !== bIndex) {
-                      return aIndex - bIndex;
-                  }
-                  
-                  // Sort by time if same type
-                  const aTime = new Date(a.time || 0).getTime();
-                  const bTime = new Date(b.time || 0).getTime();
-                  return aTime - bTime;
+                  if (aIdx !== bIdx) return aIdx - bIdx;
+                  return new Date(a.time || 0) - new Date(b.time || 0);
               });
               
-              // Draw warnings
               validWarnings.forEach(warning => {
                   const color = getWarningColor(warning.type, warning.severity);
-                  
                   try {
-                      // Try to use actual polygon geometry first
                       if (warning.geometry && warning.geometry.type) {
-                          const geometry = warning.geometry;
-                          
-                          if (geometry.type === 'Polygon') {
-                              drawPolygon(geometry.coordinates, warning, color);
+                          if (warning.geometry.type === 'Polygon') {
+                              drawPolygon(warning.geometry.coordinates, warning, color);
                               addedCount++;
-                          } else if (geometry.type === 'MultiPolygon') {
-                              geometry.coordinates.forEach(polygonCoords => {
-                                  drawPolygon(polygonCoords, warning, color);
-                              });
+                          } else if (warning.geometry.type === 'MultiPolygon') {
+                              warning.geometry.coordinates.forEach(pc => drawPolygon(pc, warning, color));
                               addedCount++;
                           } else {
-                              console.log('Unknown geometry type:', geometry.type, 'for warning:', warning.type);
-                              // Try county fallback
-                              if (addCountyFallback(warning, color)) {
-                                  countyFallbackCount++;
-                                  addedCount++;
-                              } else {
-                                  skippedCount++;
-                              }
+                              if (addCountyFallback(warning, color)) { countyFallbackCount++; addedCount++; }
+                              else skippedCount++;
                           }
-                      } 
-                      // Fallback to county boundaries if no geometry
-                      else if (warning.same && warning.same.length > 0 && countyBoundaries) {
-                          if (addCountyFallback(warning, color)) {
-                              countyFallbackCount++;
-                              addedCount++;
-                          } else {
-                              console.log('Warning missing geometry and county fallback failed:', warning.type, warning.area);
-                              skippedCount++;
-                          }
+                      } else if (warning.same && warning.same.length > 0 && countyBoundaries) {
+                          if (addCountyFallback(warning, color)) { countyFallbackCount++; addedCount++; }
+                          else { console.log('County fallback failed:', warning.type, warning.area); skippedCount++; }
                       }
                   } catch (error) {
                       console.error('Error adding warning to map:', warning.type, error);
@@ -889,117 +923,63 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   }
               });
               
-              console.log('Map loaded:', addedCount, 'warnings added,', skippedCount, 'skipped');
-              if (countyFallbackCount > 0) {
-                  console.log('County fallback used for', countyFallbackCount, 'warnings');
-              }
+              console.log('Map loaded:', addedCount, 'added,', skippedCount, 'skipped,', countyFallbackCount, 'county fallback');
           }
           
           // Draw a single polygon on the map
           function drawPolygon(coordinates, warning, color) {
-              try {
-                  // Convert coordinates from [lng, lat] to [lat, lng] for Leaflet
-                  const latLngs = coordinates[0].map(coord => [coord[1], coord[0]]);
-                  
-                  // Create polygon with styling based on warning type
-                  const polygon = L.polygon(latLngs, {
-                      color: color,
-                      fillColor: color,
-                      fillOpacity: 0.3,
-                      weight: 2,
-                      opacity: 0.8
-                  }).addTo(map);
-                  
-                  // Track this layer for cleanup
-                  warningLayers.push(polygon);
-                  
-                  // Create popup content with description
-                  const popupContent = '<div style="color: #000; min-width: 250px; max-width: 400px;">' +
-                      '<h3 style="margin-top: 0;">' + (warning.type || 'Unknown') + '</h3>' +
-                      '<p><strong>Severity:</strong> ' + (warning.severity || 'Unknown') + '</p>' +
-                      '<p><strong>Area:</strong> ' + (warning.area || 'Unknown') + '</p>' +
-                      '<p><strong>Issued:</strong> ' + formatTime(warning.time) + '</p>' +
-                      '<p><strong>Expires:</strong> ' + formatTime(warning.expiresTime) + '</p>' +
-                      (warning.description ? '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc;"><strong>Details:</strong><p style="margin-top: 5px; font-size: 0.9em; max-height: 200px; overflow-y: auto;">' + warning.description + '</p></div>' : '') +
-                      '</div>';
-                  
-                  polygon.bindPopup(popupContent, {
-                      maxWidth: 400,
-                      maxHeight: 400
-                  });
-                  
-                  // Add tooltip on hover
-                  polygon.bindTooltip((warning.type || 'Warning') + ' - ' + (warning.area || 'Unknown area'), {
-                      sticky: true
-                  });
-                  
-                  console.log('Drew polygon for:', warning.type, 'in', warning.area);
-              } catch (error) {
-                  console.error('Error creating polygon for', warning.type, ':', error);
-                  throw error;
-              }
+              const latLngs = coordinates[0].map(coord => [coord[1], coord[0]]);
+              const polygon = L.polygon(latLngs, {
+                  color, fillColor: color, fillOpacity: 0.3, weight: 2, opacity: 0.8
+              }).addTo(map);
+              
+              warningLayers.push(polygon);
+              
+              const popupContent = '<div style="color:#000; min-width:250px; max-width:400px;">' +
+                  '<h3 style="margin-top:0;">' + (warning.type || 'Unknown') + '</h3>' +
+                  '<p><strong>Severity:</strong> ' + (warning.severity || 'Unknown') + '</p>' +
+                  '<p><strong>Area:</strong> ' + (warning.area || 'Unknown') + '</p>' +
+                  '<p><strong>Issued:</strong> ' + formatTime(warning.time) + '</p>' +
+                  '<p><strong>Expires:</strong> ' + formatTime(warning.expiresTime) + '</p>' +
+                  (warning.description ? '<div style="margin-top:10px; padding-top:10px; border-top:1px solid #ccc;"><strong>Details:</strong><p style="font-size:0.9em; max-height:200px; overflow-y:auto;">' + warning.description + '</p></div>' : '') +
+                  '</div>';
+              
+              polygon.bindPopup(popupContent, { maxWidth: 400, maxHeight: 400 });
+              polygon.bindTooltip((warning.type || 'Warning') + ' - ' + (warning.area || 'Unknown area'), { sticky: true });
           }
           
-          // Add county boundaries as fallback when specific polygon is not available
+          // Add county boundaries as fallback
           function addCountyFallback(warning, color) {
-              if (!countyBoundaries || !warning.same || warning.same.length === 0) {
-                  return false;
-              }
-              
+              if (!countyBoundaries || !warning.same || warning.same.length === 0) return false;
               let addedAny = false;
               
-              // Convert SAME codes to FIPS format and add county boundaries
               warning.same.forEach(sameCode => {
-                  // SAME code format: first 3 digits are state FIPS (with leading 0), last 3 are county FIPS
-                  // We need it as 5 digits total for matching
-                  const fipsCode = sameCode.substring(1); // Remove leading 0 to get standard 5-digit FIPS
-                  
-                  // Find matching county in the GeoJSON
-                  const county = countyBoundaries.features.find(feature => 
-                      feature.id === fipsCode || feature.properties.GEO_ID === fipsCode
+                  const fipsCode = sameCode.substring(1);
+                  const county = countyBoundaries.features.find(f =>
+                      f.id === fipsCode || (f.properties && f.properties.GEO_ID === fipsCode)
                   );
                   
                   if (county && county.geometry) {
                       try {
-                          // Add the county boundary to the map with distinct styling
                           const geoJsonLayer = L.geoJSON(county, {
-                              style: {
-                                  color: color,
-                                  fillColor: color,
-                                  fillOpacity: 0.15, // Lighter opacity for county fallback
-                                  weight: 2,
-                                  opacity: 0.6,
-                                  dashArray: '5, 5' // Dashed line to indicate it's a county boundary
-                              }
+                              style: { color, fillColor: color, fillOpacity: 0.15, weight: 2, opacity: 0.6, dashArray: '5, 5' }
                           }).addTo(map);
                           
-                          // Track this layer for cleanup
                           warningLayers.push(geoJsonLayer);
                           
-                          // Create popup content with description
-                          const popupContent = '<div style="color: #000; min-width: 250px; max-width: 400px;">' +
-                              '<h3 style="margin-top: 0;">' + (warning.type || 'Unknown') + '</h3>' +
+                          const popupContent = '<div style="color:#000; min-width:250px; max-width:400px;">' +
+                              '<h3 style="margin-top:0;">' + (warning.type || 'Unknown') + '</h3>' +
                               '<p><strong>Severity:</strong> ' + (warning.severity || 'Unknown') + '</p>' +
                               '<p><strong>Area:</strong> ' + (warning.area || 'Unknown') + '</p>' +
                               '<p><strong>Issued:</strong> ' + formatTime(warning.time) + '</p>' +
                               '<p><strong>Expires:</strong> ' + formatTime(warning.expiresTime) + '</p>' +
-                              (warning.description ? '<div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc;"><strong>Details:</strong><p style="margin-top: 5px; font-size: 0.9em; max-height: 200px; overflow-y: auto;">' + warning.description + '</p></div>' : '') +
-                              '<p style="font-style: italic; font-size: 0.85em; margin-top: 10px; padding-top: 10px; border-top: 1px solid #ccc;">' +
-                              '⚠️ Showing county boundary - exact warning polygon unavailable</p>' +
+                              (warning.description ? '<div style="margin-top:10px; padding-top:10px; border-top:1px solid #ccc;"><strong>Details:</strong><p style="font-size:0.9em; max-height:200px; overflow-y:auto;">' + warning.description + '</p></div>' : '') +
+                              '<p style="font-style:italic; font-size:0.85em; margin-top:10px; padding-top:10px; border-top:1px solid #ccc;">⚠️ Showing county boundary — exact warning polygon unavailable</p>' +
                               '</div>';
                           
-                          geoJsonLayer.bindPopup(popupContent, {
-                              maxWidth: 400,
-                              maxHeight: 400
-                          });
-                          
-                          // Add tooltip
-                          geoJsonLayer.bindTooltip((warning.type || 'Warning') + ' - ' + (warning.area || 'Unknown area') + ' (County)', {
-                              sticky: true
-                          });
-                          
+                          geoJsonLayer.bindPopup(popupContent, { maxWidth: 400, maxHeight: 400 });
+                          geoJsonLayer.bindTooltip((warning.type || 'Warning') + ' - ' + (warning.area || 'Unknown') + ' (County)', { sticky: true });
                           addedAny = true;
-                          console.log('Added county fallback for:', warning.type, 'FIPS:', fipsCode);
                       } catch (error) {
                           console.error('Error adding county boundary:', error);
                       }
@@ -1013,26 +993,37 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           function formatTime(timeStr) {
               if (!timeStr) return 'Not specified';
               const date = new Date(timeStr);
-              return date.toLocaleString();
+              return isNaN(date.getTime()) ? timeStr : date.toLocaleString();
           }
           
           // Show debug information
           function showDebugInfo() {
               const debugDiv = document.getElementById('debug-info');
               if (debugDiv.style.display === 'none') {
-                  let info = 'Total warnings in data: ' + warningsData.length + '\n\n';
+                  let info = 'Total warnings: ' + warningsData.length + '\n';
+                  info += 'Active MCDs (SPC MapServer): ' + mesoscaleDiscussions.length + '\n\n';
                   
-                  warningsData.forEach((warning, index) => {
-                      info += (index + 1) + '. ' + (warning.type || 'Unknown') + ' - ' + (warning.area || 'Unknown') + '\n';
+                  if (mesoscaleDiscussions.length > 0) {
+                      info += '--- MCDs ---\n';
+                      mesoscaleDiscussions.forEach((mcd, i) => {
+                          const props  = mcd.properties || {};
+                          const mcdNum = extractMCDNumber(props);
+                          const parsed = parseMCDText(props._fullText || '');
+                          info += (i+1) + '. MCD #' + mcdNum + '\n';
+                          info += '   Geometry: ' + (mcd.geometry ? mcd.geometry.type : 'NONE') + '\n';
+                          info += '   Issued: ' + (props.idp_filedate ? formatArcGISDate(props.idp_filedate) : 'unknown') + '\n';
+                          info += '   Full text fetched: ' + (props._fullText ? 'yes (' + props._fullText.length + ' chars)' : 'no') + '\n';
+                          if (parsed.concerning) info += '   Concerning: ' + parsed.concerning + '\n';
+                          if (parsed.area)       info += '   Area: '       + parsed.area       + '\n';
+                          info += '\n';
+                      });
+                  }
+                  
+                  warningsData.forEach((warning, i) => {
+                      info += (i+1) + '. ' + (warning.type || 'Unknown') + ' - ' + (warning.area || 'Unknown') + '\n';
                       info += '   Severity: ' + (warning.severity || 'Unknown') + '\n';
-                      info += '   Has Geometry: ' + (warning.geometry ? 'Yes' : 'NO') + '\n';
-                      if (warning.geometry) {
-                          info += '   Geometry Type: ' + (warning.geometry.type || 'unknown') + '\n';
-                      }
-                      if (warning.same && warning.same.length > 0) {
-                          info += '   SAME Codes: ' + warning.same.join(', ') + '\n';
-                          info += '   County Fallback: ' + (countyBoundaries ? 'Available' : 'Unavailable') + '\n';
-                      }
+                      info += '   Geometry: ' + (warning.geometry ? warning.geometry.type : 'NONE') + '\n';
+                      if (warning.same && warning.same.length > 0) info += '   SAME: ' + warning.same.join(', ') + '\n';
                       info += '\n';
                   });
                   
@@ -1043,11 +1034,9 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               }
           }
           
-          // Function to update all expiration countdowns
+          // Update all expiration countdowns
           function updateAllExpirationCountdowns() {
-              const expirationElements = document.querySelectorAll('[data-expires-timestamp]');
-              
-              expirationElements.forEach(function(element) {
+              document.querySelectorAll('[data-expires-timestamp]').forEach(function(element) {
                   const expiresTimestamp = parseInt(element.getAttribute('data-expires-timestamp'));
                   if (!expiresTimestamp) return;
                   
@@ -1061,23 +1050,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       const hours = Math.floor(timeLeft / 3600);
                       const minutes = Math.floor((timeLeft % 3600) / 60);
                       const seconds = timeLeft % 60;
-                      
-                      // Format the countdown
-                      let countdownText = "";
-                      if (hours > 0) {
-                          countdownText += hours + "h ";
-                      }
-                      countdownText += minutes + "m " + seconds + "s";
-                      
+                      let countdownText = '';
+                      if (hours > 0) countdownText += hours + 'h ';
+                      countdownText += minutes + 'm ' + seconds + 's';
                       element.textContent = countdownText;
-                      
-                      // Add warning classes based on time remaining
-                      element.classList.remove("urgent", "warning");
-                      if (timeLeft < 1800) { // Less than 30 minutes
-                          element.classList.add("urgent");
-                      } else if (timeLeft < 7200) { // Less than 2 hours
-                          element.classList.add("warning");
-                      }
+                      element.classList.remove('urgent', 'warning');
+                      if (timeLeft < 1800) element.classList.add('urgent');
+                      else if (timeLeft < 7200) element.classList.add('warning');
                   }
               });
           }
@@ -1112,7 +1091,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        <div id="list-section">
           <h2 style="margin-top: 20px;">List View</h2>
           
-          <!-- Mesoscale Discussions Container (populated by JavaScript) -->
+          <!-- MCDs are injected here by JavaScript after NWS fetch -->
           <div id="mcd-container"></div>
           
           {{ if eq (len .Warnings) 0 }}
@@ -1164,8 +1143,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              <span>Severe Thunderstorm Watch</span>
           </div>
           <div class="legend-item">
-             <div class="legend-color" style="background-color: #00aaaa;"></div>
-             <span>Mesoscale Discussion (MCD)</span>
+             <div class="legend-color" style="background-color: #00aaaa; border-style: dashed;"></div>
+             <span>Mesoscale Discussion (MCD) — NWS polygon</span>
           </div>
           <div class="legend-item">
              <div class="legend-color" style="background-color: #a52a2a;"></div>
@@ -1176,7 +1155,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              <span>Moderate Warnings</span>
           </div>
           <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--card-border); font-size: 0.9em; color: #888;">
-             <strong>Note:</strong> Solid polygons show exact warning boundaries. Dashed lines indicate county boundaries (used when exact polygon unavailable) or mesoscale discussions.
+             <strong>Note:</strong> Solid polygons show exact warning boundaries. Dashed outlines indicate county boundaries (fallback) or MCD areas.
           </div>
        </div>
        
@@ -1188,13 +1167,11 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
 		return err
 	}
 
-	// Convert warnings to JSON for JavaScript
 	warningsJSON, err := json.Marshal(warnings)
 	if err != nil {
 		return fmt.Errorf("failed to marshal warnings to JSON: %w", err)
 	}
 
-	// Prepare data for template
 	data := struct {
 		Warnings          []TemplateWarning
 		LastUpdated       string
@@ -1211,16 +1188,12 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
 		UpdatedAtUTC:      time.Now().UTC().Unix(),
 	}
 
-	// Create a buffer to store the rendered HTML
 	var buf bytes.Buffer
-
-	// Execute the template
 	err = tmpl.Execute(&buf, data)
 	if err != nil {
 		return err
 	}
 
-	// Write to file
 	return os.WriteFile(outputPath, buf.Bytes(), 0644)
 }
 
@@ -1240,11 +1213,9 @@ type TypeCount struct {
 	Priority int
 }
 
-// countWarningTypes counts the number of each type of warning
 func countWarningTypes(warnings []fetcher.Warning) map[string]int {
 	typeCounts := make(map[string]int)
 	for _, warning := range warnings {
-		// Don't count our header markers as warnings
 		if warning.Severity != "Header" {
 			typeCounts[warning.Type]++
 		}
@@ -1252,12 +1223,8 @@ func countWarningTypes(warnings []fetcher.Warning) map[string]int {
 	return typeCounts
 }
 
-// sortedWarningTypeCounts creates a sorted list of warning type counts
 func sortedWarningTypeCounts(warnings []fetcher.Warning) []TypeCount {
-	// First count all warnings by type
 	typeCounts := countWarningTypes(warnings)
-
-	// Convert to slice for sorting
 	var result []TypeCount
 	for warningType, count := range typeCounts {
 		result = append(result, TypeCount{
@@ -1266,265 +1233,191 @@ func sortedWarningTypeCounts(warnings []fetcher.Warning) []TypeCount {
 			Priority: getWarningTypeRank(warningType),
 		})
 	}
-
-	// Sort by priority first, then by count (descending)
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Priority != result[j].Priority {
-			return result[i].Priority < result[j].Priority // Lower priority number means higher importance
+			return result[i].Priority < result[j].Priority
 		}
-		return result[i].Count > result[j].Count // Higher count is more important
+		return result[i].Count > result[j].Count
 	})
-
 	return result
 }
 
-// TemplateWarning is a wrapper for fetcher.Warning with additional methods
+// TemplateWarning is a wrapper for fetcher.Warning with additional template fields
 type TemplateWarning struct {
 	fetcher.Warning
 	SeverityClass    string
-	SeverityRank     int    // Added for sorting
-	WarningTypeRank  int    // Added for prioritized ordering
-	LocalIssued      string // Local time of issue
-	LocalExpires     string // Local time of expiration
-	ExpiresTimestamp string // Unix timestamp for JavaScript countdown
-	ExtraClass       string // Extra CSS class for special warning types
-	ID               string // Warning ID for linking to map
+	SeverityRank     int
+	WarningTypeRank  int
+	LocalIssued      string
+	LocalExpires     string
+	ExpiresTimestamp string
+	ExtraClass       string
+	ID               string
 }
 
-// getWarningTypeRank assigns priority rank based on warning type
 func getWarningTypeRank(warningType string) int {
 	lowerType := strings.ToLower(warningType)
-
-	// First priority: Tornado Warning
 	if strings.Contains(lowerType, "tornado warning") {
 		return 1
 	}
-	// Second priority: Severe Thunderstorm Warning
 	if strings.Contains(lowerType, "thunderstorm warning") ||
 		strings.Contains(lowerType, "t-storm warning") ||
 		strings.Contains(lowerType, "tstorm warning") {
 		return 2
 	}
-	// Third priority: Tornado Watch
 	if strings.Contains(lowerType, "tornado") && strings.Contains(lowerType, "watch") {
 		return 3
 	}
-	// Fourth priority: Severe Thunderstorm Watch
 	if (strings.Contains(lowerType, "thunderstorm") ||
 		strings.Contains(lowerType, "t-storm") ||
 		strings.Contains(lowerType, "tstorm")) &&
 		strings.Contains(lowerType, "watch") {
 		return 4
 	}
-	// All other warnings
 	return 5
 }
 
-// convertWarnings transforms fetcher.Warning to TemplateWarning
-// and sorts all warnings by type priority first, then by severity
 func convertWarnings(warnings []fetcher.Warning) []TemplateWarning {
-	// Group warnings by type
 	warningsByType := make(map[string][]TemplateWarning)
 	var warningTypes []string
 
-	// First convert all warnings to TemplateWarning
 	for _, warning := range warnings {
-		// Format the times to local time - ensure both times are properly converted to local time
 		localIssued := formatToLocalTime(warning.Time)
 		localExpires := formatToLocalTime(warning.ExpiresTime)
-
-		// Get Unix timestamp for expiration countdown
 		expiresTimestamp := getExpiresTimestamp(warning.ExpiresTime)
 
-		// Determine if this is a special warning type
 		lowerType := strings.ToLower(warning.Type)
 		isTornado := strings.Contains(lowerType, "tornado warning")
 		isTornadoWatch := strings.Contains(lowerType, "tornado") && strings.Contains(lowerType, "watch")
 		isThunderstormWatch := (strings.Contains(lowerType, "thunderstorm") ||
 			strings.Contains(lowerType, "t-storm") ||
-			strings.Contains(lowerType, "tstorm")) &&
-			strings.Contains(lowerType, "watch")
+			strings.Contains(lowerType, "tstorm")) && strings.Contains(lowerType, "watch")
 		isTstorm := strings.Contains(lowerType, "thunderstorm warning") ||
 			strings.Contains(lowerType, "t-storm warning") ||
 			strings.Contains(lowerType, "tstorm warning")
 
-		// Determine CSS class based on warning type and severity
 		var severityClass string
-		if isTornadoWatch {
+		switch {
+		case isTornadoWatch:
 			severityClass = "tornado-watch"
-		} else if isThunderstormWatch {
+		case isThunderstormWatch:
 			severityClass = "watch"
-		} else if isTornado {
+		case isTornado:
 			severityClass = "tornado"
-		} else if isTstorm {
+		case isTstorm:
 			severityClass = "tstorm"
-		} else {
+		default:
 			severityClass = getSeverityClass(warning.Severity)
 		}
-
-		// Get type rank for prioritized ordering
-		warningTypeRank := getWarningTypeRank(warning.Type)
 
 		templateWarning := TemplateWarning{
 			Warning:          warning,
 			SeverityClass:    severityClass,
 			SeverityRank:     getSeverityRank(warning.Severity),
-			WarningTypeRank:  warningTypeRank,
+			WarningTypeRank:  getWarningTypeRank(warning.Type),
 			LocalIssued:      localIssued,
 			LocalExpires:     localExpires,
 			ExpiresTimestamp: expiresTimestamp,
-			ExtraClass:       "", // Will be set for headers later
+			ExtraClass:       "",
 			ID:               warning.ID,
 		}
 
-		// If this is a new warning type, add it to our list of types
 		if _, exists := warningsByType[warning.Type]; !exists {
 			warningTypes = append(warningTypes, warning.Type)
 		}
 		warningsByType[warning.Type] = append(warningsByType[warning.Type], templateWarning)
 	}
 
-	// Sort each type's warnings by severity
 	for warningType := range warningsByType {
 		sort.Slice(warningsByType[warningType], func(i, j int) bool {
 			return warningsByType[warningType][i].SeverityRank > warningsByType[warningType][j].SeverityRank
 		})
 	}
 
-	// Sort warning types by our predetermined priority
 	sort.Slice(warningTypes, func(i, j int) bool {
-		// Get the warning type rank for each type
-		iTypeRank := getWarningTypeRank(warningTypes[i])
-		jTypeRank := getWarningTypeRank(warningTypes[j])
-
-		// First sort by warning type rank
-		if iTypeRank != jTypeRank {
-			return iTypeRank < jTypeRank // Lower rank number = higher priority
+		iRank := getWarningTypeRank(warningTypes[i])
+		jRank := getWarningTypeRank(warningTypes[j])
+		if iRank != jRank {
+			return iRank < jRank
 		}
-
-		// If same warning type rank, sort by highest severity
-		iMaxSeverity := 0
+		iMax, jMax := 0, 0
 		for _, w := range warningsByType[warningTypes[i]] {
-			if w.SeverityRank > iMaxSeverity {
-				iMaxSeverity = w.SeverityRank
+			if w.SeverityRank > iMax {
+				iMax = w.SeverityRank
 			}
 		}
-
-		jMaxSeverity := 0
 		for _, w := range warningsByType[warningTypes[j]] {
-			if w.SeverityRank > jMaxSeverity {
-				jMaxSeverity = w.SeverityRank
+			if w.SeverityRank > jMax {
+				jMax = w.SeverityRank
 			}
 		}
-
-		return iMaxSeverity > jMaxSeverity
+		return iMax > jMax
 	})
 
-	// Build the final ordered list of warnings
 	var templateWarnings []TemplateWarning
 
 	for _, warningType := range warningTypes {
 		typeWarnings := warningsByType[warningType]
-
-		// Check if this is a special warning type
 		lowerType := strings.ToLower(warningType)
-		isTornadoWarning := strings.Contains(lowerType, "tornado warning")
-		isTornadoWatch := strings.Contains(lowerType, "tornado") && strings.Contains(lowerType, "watch")
-		isThunderstormWatch := (strings.Contains(lowerType, "thunderstorm") ||
-			strings.Contains(lowerType, "t-storm") ||
-			strings.Contains(lowerType, "tstorm")) &&
-			strings.Contains(lowerType, "watch")
-		isTstormWarning := strings.Contains(lowerType, "thunderstorm warning") ||
-			strings.Contains(lowerType, "t-storm warning") ||
-			strings.Contains(lowerType, "tstorm warning")
 
-		// Set extra class for special headers
 		extraHeaderClass := ""
-		if isTornadoWarning {
+		switch {
+		case strings.Contains(lowerType, "tornado warning"):
 			extraHeaderClass = "tornado-header"
-		} else if isTornadoWatch {
+		case strings.Contains(lowerType, "tornado") && strings.Contains(lowerType, "watch"):
 			extraHeaderClass = "tornado-watch-header"
-		} else if isThunderstormWatch {
+		case (strings.Contains(lowerType, "thunderstorm") || strings.Contains(lowerType, "t-storm") || strings.Contains(lowerType, "tstorm")) && strings.Contains(lowerType, "watch"):
 			extraHeaderClass = "watch-header"
-		} else if isTstormWarning {
+		case strings.Contains(lowerType, "thunderstorm warning") || strings.Contains(lowerType, "t-storm warning") || strings.Contains(lowerType, "tstorm warning"):
 			extraHeaderClass = "tstorm-header"
 		}
 
-		// Add type header marker
 		headerWarning := TemplateWarning{
 			Warning: fetcher.Warning{
-				Type:        warningType,
-				Severity:    "Header", // Special marker for headers
-				Description: "",       // Empty description for headers
-				Area:        "",
-				Time:        "",
+				Type:     warningType,
+				Severity: "Header",
 			},
-			SeverityClass:    "header",
-			SeverityRank:     0,
-			WarningTypeRank:  getWarningTypeRank(warningType),
-			LocalIssued:      "",
-			LocalExpires:     "",
-			ExpiresTimestamp: "",
-			ExtraClass:       extraHeaderClass,
+			SeverityClass:   "header",
+			SeverityRank:    0,
+			WarningTypeRank: getWarningTypeRank(warningType),
+			ExtraClass:      extraHeaderClass,
 		}
 
-		// Add header first
 		templateWarnings = append(templateWarnings, headerWarning)
-
-		// Then add warnings (already sorted by severity)
 		templateWarnings = append(templateWarnings, typeWarnings...)
 	}
 
 	return templateWarnings
 }
 
-// formatToLocalTime converts time strings to local time
 func formatToLocalTime(timeStr string) string {
-	// If the time string is empty, return an appropriate message
 	if timeStr == "" {
 		return "Not specified"
 	}
-
-	// Parse the input time string based on the expected format
 	t, err := time.Parse("2006-01-02T15:04:05Z", timeStr)
 	if err != nil {
-		// Try alternative date format that might be used
 		t, err = time.Parse(time.RFC3339, timeStr)
 		if err != nil {
-			// If there's still an error parsing, just return the original string
 			return timeStr
 		}
 	}
-
-	// Convert to local time zone
-	localTime := t.Local()
-
-	// Format the time in a user-friendly way
-	return localTime.Format("Jan 2, 2006 at 3:04 PM MST")
+	return t.Local().Format("Jan 2, 2006 at 3:04 PM MST")
 }
 
-// getExpiresTimestamp converts expiration time to Unix timestamp for JavaScript countdown
 func getExpiresTimestamp(timeStr string) string {
 	if timeStr == "" {
 		return ""
 	}
-
-	// Parse the input time string based on the expected format
 	t, err := time.Parse("2006-01-02T15:04:05Z", timeStr)
 	if err != nil {
-		// Try alternative date format that might be used
 		t, err = time.Parse(time.RFC3339, timeStr)
 		if err != nil {
-			// If there's an error parsing, return empty string
 			return ""
 		}
 	}
-
-	// Convert to Unix timestamp (seconds since epoch)
 	return fmt.Sprintf("%d", t.Unix())
 }
 
-// getSeverityClass determines the CSS class based on severity
 func getSeverityClass(severity string) string {
 	switch severity {
 	case "Severe", "Extreme":
@@ -1538,7 +1431,6 @@ func getSeverityClass(severity string) string {
 	}
 }
 
-// getSeverityRank returns a numeric rank for sorting warnings by severity
 func getSeverityRank(severity string) int {
 	switch severity {
 	case "Extreme":
@@ -1549,8 +1441,6 @@ func getSeverityRank(severity string) int {
 		return 2
 	case "Minor":
 		return 1
-	case "Header": // Special case for our header markers
-		return 0
 	default:
 		return 0
 	}
@@ -1558,7 +1448,6 @@ func getSeverityRank(severity string) int {
 
 // GenerateWarningsJSON creates a JSON file with current warnings data for AJAX updates
 func GenerateWarningsJSON(warnings []fetcher.Warning, outputPath string) error {
-	// Create a data structure for the JSON
 	data := struct {
 		Warnings     []fetcher.Warning `json:"warnings"`
 		LastUpdated  string            `json:"lastUpdated"`
@@ -1571,12 +1460,10 @@ func GenerateWarningsJSON(warnings []fetcher.Warning, outputPath string) error {
 		UpdatedAtUTC: time.Now().UTC().Unix(),
 	}
 
-	// Marshal to JSON
 	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 
-	// Write to file
 	return os.WriteFile(outputPath, jsonData, 0644)
 }
