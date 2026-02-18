@@ -599,23 +599,17 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       warningsData = data.warnings;
                       updateStats(data);
 
-                      // Redraw NWS warning polygons immediately
-                      clearWarningLayers();
-                      addWarningsToMap();
-                      updateListView(data.warnings);
-
-                      // Redraw NWS warning polygons immediately
+                      // Clear layers and redraw in correct order
                       clearWarningLayers();
                       
-                      // Reload MCDs first (below warnings), then add warnings on top
+                      // Fetch MCDs and rebuild map layers
                       fetchMesoscaleDiscussions().then(features => {
                           mesoscaleDiscussions = features;
                           addMesoscaleDiscussionsToMap();
-                          addMesoscaleDiscussionsToList();
-                          enrichMCDsWithText();
-                          // Add warnings after MCDs so they're on top
                           addWarningsToMap();
                           bringSevereToFront();
+                          addMesoscaleDiscussionsToList();
+                          enrichMCDsWithText();
                           updateListView(data.warnings);
                       });
 
