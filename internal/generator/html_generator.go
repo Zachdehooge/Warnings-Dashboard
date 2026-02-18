@@ -330,6 +330,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           let countyBoundaries = null;
           let warningLayers = [];
           let mesoscaleDiscussions = [];
+          let validMCDs = [];
           let updateInterval = 30000;
           let lastUpdateTime = Date.now();
           
@@ -642,24 +643,30 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               const container = document.getElementById('mcd-container');
               if (!container) return;
               
-               // Update the MCD count in the header
-               const mcdCountEl = document.getElementById('mcd-count');
-               if (mcdCountEl) mcdCountEl.textContent = mesoscaleDiscussions.length;
-               
-               const mcdTotalCountEl = document.getElementById('mcd-total-count');
-               if (mcdTotalCountEl) mcdTotalCountEl.textContent = mesoscaleDiscussions.length;
+              // Filter out MCDs with invalid numbers (????)
+              validMCDs = mesoscaleDiscussions.filter(mcd => {
+                  const mcdNum = extractMCDNumber(mcd.properties || {});
+                  return mcdNum !== '????';
+              });
               
-              if (mesoscaleDiscussions.length === 0) {
+              // Update the MCD count in the header
+              const mcdCountEl = document.getElementById('mcd-count');
+              if (mcdCountEl) mcdCountEl.textContent = validMCDs.length;
+              
+              const mcdTotalCountEl = document.getElementById('mcd-total-count');
+              if (mcdTotalCountEl) mcdTotalCountEl.textContent = validMCDs.length;
+             
+              if (validMCDs.length === 0) {
                   container.innerHTML = '';
                   return;
               }
               
               let html = '<div class="warning header mcd-header" style="grid-column: 1 / -1; margin-top: 20px;">' +
-                  '<h2>Mesoscale Discussions (' + mesoscaleDiscussions.length + ')</h2>' +
+                  '<h2>Mesoscale Discussions (' + validMCDs.length + ')</h2>' +
                   '</div>' +
                   '<div class="warnings-container">';
               
-              mesoscaleDiscussions.forEach((mcd, index) => {
+              validMCDs.forEach((mcd, index) => {
                   const props   = mcd.properties || {};
                   const mcdNum  = extractMCDNumber(props);
                   const parsed  = parseMCDText(props._fullText || '');
@@ -754,7 +761,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           function zoomToMCD(index) {
               document.getElementById('map').scrollIntoView({ behavior: 'smooth', block: 'center' });
               
-              const mcd = mesoscaleDiscussions[index];
+              const mcd = validMCDs[index];
               if (!mcd || !mcd.geometry) {
                   console.log('MCD not found or has no geometry');
                   return;
@@ -778,9 +785,146 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               }
           }
           
+          // Get severity class for a warning
+          function getSeverityClassJS(severity) {
+              if (!severity) return 'other';
+              const s = severity.toLowerCase();
+              if (s === 'extreme') return 'extreme';
+              if (s === 'severe') return 'severe';
+              if (s === 'moderate') return 'moderate';
+              if (s === 'minor') return 'minor';
+              return 'other';
+          }
+
+          // Determine severity class based on warning type
+          function getWarningSeverityClass(warning) {
+              const typeLower = (warning.type || '').toLowerCase();
+              const isTornado = typeLower.includes('tornado warning');
+              const isTornadoWatch = typeLower.includes('tornado') && typeLower.includes('watch');
+              const isThunderstormWatch = (typeLower.includes('thunderstorm') || 
+                                           typeLower.includes('t-storm') || 
+                                           typeLower.includes('tstorm')) && typeLower.includes('watch');
+              const isTstorm = typeLower.includes('thunderstorm warning') || 
+                              typeLower.includes('t-storm warning') || 
+                              typeLower.includes('tstorm warning');
+              
+              if (isTornado) return 'tornado';
+              if (isTornadoWatch) return 'tornado-watch';
+              if (isThunderstormWatch) return 'watch';
+              if (isTstorm) return 'tstorm';
+              return getSeverityClassJS(warning.severity);
+          }
+
+          // Parse ISO date string to local time string
+          function parseISOTime(isoString) {
+              if (!isoString) return '';
+              try {
+                  const date = new Date(isoString);
+                  return date.toLocaleString(undefined, {
+                      year: 'numeric', month: 'short', day: 'numeric',
+                      hour: 'numeric', minute: '2-digit', second: '2-digit',
+                      timeZoneName: 'short'
+                  });
+              } catch (e) {
+                  return isoString;
+              }
+          }
+
+          // Get expires timestamp in seconds for countdown
+          function getExpiresTimestamp(isoString) {
+              if (!isoString) return '';
+              try {
+                  return Math.floor(new Date(isoString).getTime() / 1000);
+              } catch (e) {
+                  return '';
+              }
+          }
+
+          // Render a single warning card
+          function renderWarningCard(warning) {
+              const severityClass = getWarningSeverityClass(warning);
+              const localIssued = parseISOTime(warning.time);
+              const localExpires = parseISOTime(warning.expiresTime);
+              const expiresTimestamp = getExpiresTimestamp(warning.expiresTime);
+              
+              return '<div class="warning ' + severityClass + '" data-warning-id="' + warning.id + '">' +
+                  '<div class="warning-header">' +
+                      '<h2 class="warning-title" style="cursor: pointer;" onclick="zoomToWarning(\'' + warning.id + '\')">' + warning.type + '</h2>' +
+                      '<strong>' + warning.severity + ' Severity</strong>' +
+                  '</div>' +
+                  '<p><strong>Area:</strong> ' + (warning.area || '') + '</p>' +
+                  '<p>' + (warning.description || '') + '</p>' +
+                  '<small>Issued: ' + localIssued + '</small><br>' +
+                  '<div class="expiration-time">' +
+                      '<small>Expires: ' + localExpires + '</small>' +
+                      '<small class="expiration-countdown" data-expires-timestamp="' + expiresTimestamp + '"></small>' +
+                  '</div>' +
+              '</div>';
+          }
+
+          // Group warnings by type and render
+          function renderWarningsList(warnings) {
+              const warningsByType = {};
+              
+              warnings.forEach(function(warning) {
+                  if (!warningsByType[warning.type]) {
+                      warningsByType[warning.type] = [];
+                  }
+                  warningsByType[warning.type].push(warning);
+              });
+              
+              const typeOrder = ['Tornado Warning', 'Severe Thunderstorm Warning', 'Tornado Watch', 'Severe Thunderstorm Watch'];
+              
+              const sortedTypes = Object.keys(warningsByType).sort(function(a, b) {
+                  const idxA = typeOrder.indexOf(a);
+                  const idxB = typeOrder.indexOf(b);
+                  if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                  if (idxA !== -1) return -1;
+                  if (idxB !== -1) return 1;
+                  return a.localeCompare(b);
+              });
+              
+              let html = '<div class="warnings-container">';
+              
+              sortedTypes.forEach(function(type) {
+                  const severityClass = getWarningSeverityClass(warningsByType[type][0]);
+                  html += '<div class="warning header ' + severityClass + '" id="' + encodeURIComponent(type) + '">' +
+                      '<h2>' + type + '</h2>' +
+                  '</div>';
+                  
+                  warningsByType[type].forEach(function(warning) {
+                      html += renderWarningCard(warning);
+                  });
+              });
+              
+              html += '</div>';
+              return html;
+          }
+
           // Update the list view with new warnings
           function updateListView(warnings) {
               console.log('List view update - ' + warnings.length + ' warnings');
+              
+              const listSection = document.getElementById('list-section');
+              if (!listSection) return;
+              
+              const mcdContainer = document.getElementById('mcd-container');
+              
+              if (warnings.length === 0) {
+                  listSection.innerHTML = '<div id="mcd-container" style="margin-bottom: 20px;"></div>' +
+                      '<p>No active weather warnings at this time.</p>';
+                  updateAllExpirationCountdowns();
+                  return;
+              }
+              
+              const warningsHTML = renderWarningsList(warnings);
+              listSection.innerHTML = '<div id="mcd-container" style="margin-bottom: 20px;"></div>' + warningsHTML;
+              
+              if (mcdContainer && mcdContainer.innerHTML) {
+                  document.getElementById('mcd-container').innerHTML = mcdContainer.innerHTML;
+              }
+              
+              updateAllExpirationCountdowns();
           }
           
           // Format timestamp to user's local time
@@ -927,14 +1071,22 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           }
           
           // ------------------------------------------------------------------
-          // Draw all active MCDs on the map using the exact SPC polygon geometry
+          // Add MCD polygons to map. Data (including full text) is
           // returned by the NOAA ArcGIS MapServer. Popup shows structured
           // discussion text (area, concerning, valid, summary, discussion body).
           // ------------------------------------------------------------------
           function addMesoscaleDiscussionsToMap() {
               if (mesoscaleDiscussions.length === 0) return;
               
-              mesoscaleDiscussions.forEach((mcd, index) => {
+              // Filter out MCDs with invalid numbers (????)
+              validMCDs = mesoscaleDiscussions.filter(mcd => {
+                  const mcdNum = extractMCDNumber(mcd.properties || {});
+                  return mcdNum !== '????';
+              });
+              
+              if (validMCDs.length === 0) return;
+              
+              validMCDs.forEach((mcd, index) => {
                   if (!mcd.geometry) return;
                   
                   try {
