@@ -424,7 +424,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           function extractMCDNumber(props) {
               if (!props.name) return '????';
               const digits = String(props.name).replace(/[^0-9]/g, '');
-              return digits ? digits.padStart(4, '0') : '????';
+              return digits ? digits : '????';
           }
 
           // ArcGIS dates are Unix milliseconds; convert to a locale string with timezone.
@@ -500,10 +500,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
 
               // Grab single-line value after LABEL...
               const getInline = (label) => {
-                  const re = new RegExp('^' + label + '\\.{3}(.+)$', 'im');
+                  const re = new RegExp(label + '\\.{3}(.+)', 'i');
                   const m  = text.match(re);
                   if (m) return m[1].trim();
-                  const re2 = new RegExp('^' + label + '\\s+(.+)$', 'im');
+                  const re2 = new RegExp(label + '\\s+(.+)', 'i');
                   const m2 = text.match(re2);
                   return m2 ? m2[1].trim() : '';
               };
@@ -605,12 +605,19 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       addWarningsToMap();
                       updateListView(data.warnings);
 
-                      // Reload MCDs independently in background
+                      // Redraw NWS warning polygons immediately
+                      clearWarningLayers();
+                      
+                      // Reload MCDs first (below warnings), then add warnings on top
                       fetchMesoscaleDiscussions().then(features => {
                           mesoscaleDiscussions = features;
                           addMesoscaleDiscussionsToMap();
                           addMesoscaleDiscussionsToList();
                           enrichMCDsWithText();
+                          // Add warnings after MCDs so they're on top
+                          addWarningsToMap();
+                          bringSevereToFront();
+                          updateListView(data.warnings);
                       });
 
                       console.log('Update complete');
@@ -673,14 +680,16 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       '<h2 class="warning-title" style="cursor:pointer;" onclick="zoomToMCD(' + index + ')">' +
                           'MCD #' + mcdNum +
                       '</h2>' +
-                      '<strong>SPC</strong>' +
-                  '</div>';
-
-                  html += '<small><strong>Issued:</strong> ' + escapeHtml(issued);
-                  if (expire) {
-                      html += ' &nbsp;|&nbsp; <strong>Expires:</strong> ' + escapeHtml(formatExpireToLocal(expire, props._fullText));
+                      '<strong>SPC</strong>';
+                  if (parsed.probability) {
+                      html += ' <span style="color:#ff6600; font-weight:bold;">POWI: ' + escapeHtml(parsed.probability) + '</span>';
                   }
-                  html += '</small>';
+                  html += '</div>';
+
+                  html += '<small><strong>Issued:</strong> ' + escapeHtml(issued) + '</small>';
+                  if (expire) {
+                      html += '<small style="display:block;"><strong>Expires:</strong> ' + escapeHtml(formatExpireToLocal(expire, props._fullText)) + '</small>';
+                  }
 
                   if (parsed.area) {
                       html += '<p style="margin:6px 0 2px;"><strong>Area:</strong> ' + escapeHtml(parsed.area) + '</p>';
@@ -690,9 +699,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   }
                   if (parsed.valid) {
                       html += '<p style="margin:2px 0;"><strong>Valid:</strong> ' + escapeHtml(parsed.valid) + '</p>';
-                  }
-                  if (parsed.probability) {
-                      html += '<p style="margin:2px 0;"><strong>Probability of Watch Issuance:</strong> ' + escapeHtml(parsed.probability) + '</p>';
                   }
                   if (parsed.summary) {
                       html += '<div class="mcd-description" style="max-height:120px;">' +
@@ -911,18 +917,20 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                map.on('moveend', saveMapState);
                map.on('zoomend', saveMapState);
 
-              // Render NWS warnings immediately — no waiting on anything external
-              addWarningsToMap();
+               // Render NWS warnings immediately
+               addWarningsToMap();
 
-              // Load MCDs and county boundaries in parallel, each independent.
-              // Neither blocks the other or the warnings already on screen.
-              fetchMesoscaleDiscussions().then(features => {
-                  mesoscaleDiscussions = features;
-                  addMesoscaleDiscussionsToMap();
-                  addMesoscaleDiscussionsToList();
-                  // Backfill text in background — updates cards/popups in-place as each finishes
-                  enrichMCDsWithText();
-              });
+               // Load MCDs - then reorder so MCDs below warnings
+               fetchMesoscaleDiscussions().then(features => {
+                   mesoscaleDiscussions = features;
+                   // Re-add in correct order: MCDs first, then warnings
+                   clearWarningLayers();
+                   addMesoscaleDiscussionsToMap();
+                   addWarningsToMap();
+                   bringSevereToFront();
+                   addMesoscaleDiscussionsToList();
+                   enrichMCDsWithText();
+               });
 
               loadCountyBoundaries();
           }
@@ -961,9 +969,9 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                               opacity: 0.9,
                               dashArray: '10, 5'
                           }
-                      }).addTo(map);
-                      
-                      warningLayers.push(geoJsonLayer);
+                       }).addTo(map);
+                        
+                       warningLayers.push(geoJsonLayer);
 
                       // Build popup — prefer parsed structured fields, fall back to popupinfo snippet
                       let bodyHtml = '';
@@ -1009,12 +1017,14 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                           '<div style="color:#000; min-width:260px; max-width:460px;">' +
                           '<h3 style="margin-top:0; margin-bottom:6px; color:#006666;">MCD #' + mcdNum + '</h3>' +
                           '<p style="margin:3px 0;"><strong>Source:</strong> Storm Prediction Center</p>' +
-                          '<p style="margin:3px 0;"><strong>Issued:</strong> ' + escapeHtml(issued);
+                          '<p style="margin:3px 0;"><strong>Issued:</strong> ' + escapeHtml(issued) + '</p>';
                       if (expire) {
-                          popupContent += ' &nbsp;|&nbsp; <strong>Expires:</strong> ' + escapeHtml(formatExpireToLocal(expire, props._fullText));
+                          popupContent += '<p style="margin:3px 0;"><strong>Expires:</strong> ' + escapeHtml(formatExpireToLocal(expire, props._fullText)) + '</p>';
                       }
-                      popupContent += '</p>' +
-                          bodyHtml +
+                      if (parsed.probability) {
+                          popupContent += '<p style="margin:3px 0; color:#ff6600; font-weight:bold;">Probability of Watch Issuance: ' + escapeHtml(parsed.probability) + '</p>';
+                      }
+                      popupContent += bodyHtml +
                           '<p style="margin-top:10px; padding-top:8px; border-top:1px solid #ccc;">' +
                           '<a href="' + spcUrl + '" target="_blank" style="color:#006666; font-weight:bold;">View full discussion on SPC ↗</a>' +
                           '</p>' +
@@ -1106,6 +1116,16 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               console.log('Map loaded:', addedCount, 'added,', skippedCount, 'skipped,', countyFallbackCount, 'county fallback');
           }
           
+          // Bring severe warnings to front (above MCDs)
+          function bringSevereToFront() {
+              warningLayers.forEach(layer => {
+                  const sev = layer.warningSeverity;
+                  if (sev === 'Severe') {
+                      layer.bringToFront();
+                  }
+              });
+          }
+          
           // Draw a single polygon on the map
           function drawPolygon(coordinates, warning, color) {
               const latLngs = coordinates[0].map(coord => [coord[1], coord[0]]);
@@ -1113,6 +1133,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   color, fillColor: color, fillOpacity: 0.3, weight: 2, opacity: 0.8
               }).addTo(map);
               
+              polygon.warningSeverity = warning.severity;
               warningLayers.push(polygon);
               
               const popupContent = '<div style="color:#000; min-width:250px; max-width:400px;">' +
