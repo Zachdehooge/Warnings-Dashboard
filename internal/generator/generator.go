@@ -161,7 +161,7 @@ func fetchAllAlerts() ([]WarningJSON, error) {
 		for _, f := range apiResp.Features {
 			p := f.Properties
 
-			if p.Status != "actual" {
+			if p.Status != "Actual" {
 				continue
 			}
 			// Skip already-expired alerts
@@ -357,6 +357,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           let mesoscaleDiscussions = [];
           let validMCDs = [];
           let lastUpdateTime = Date.now();
+          let mcdFetchInProgress = false;
 
           // ------------------------------------------------------------------
           // POLL: read warnings.json written by the Go poller every 15 seconds.
@@ -390,7 +391,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   // Refresh MCDs in background — does not block warning display
                   fetchMesoscaleDiscussions().then(features => {
                       mesoscaleDiscussions = features;
-                      clearWarningLayers();
                       addMesoscaleDiscussionsToMap();
                       addWarningsToMap();
                       bringSevereToFront();
@@ -409,6 +409,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           // Fetch Mesoscale Discussions from the NOAA ArcGIS MapServer
           // ------------------------------------------------------------------
           async function fetchMesoscaleDiscussions() {
+              if (mcdFetchInProgress) return;
+              mcdFetchInProgress = true;
               try {
                   const base = 'https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/spc_mesoscale_discussion/MapServer/0/query';
                   const params = new URLSearchParams({
@@ -448,6 +450,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               } catch (error) {
                   console.error('Error fetching SPC MCDs:', error);
                   return [];
+              } finally {
+                  mcdFetchInProgress = false;
               }
           }
 
@@ -847,7 +851,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               // MCDs in background
               fetchMesoscaleDiscussions().then(features => {
                   mesoscaleDiscussions = features;
-                  clearWarningLayers();
                   addMesoscaleDiscussionsToMap();
                   addWarningsToMap();
                   bringSevereToFront();
