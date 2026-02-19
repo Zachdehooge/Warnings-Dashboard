@@ -586,42 +586,96 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               warningLayers = [];
           }
           
-          // Fetch updated warnings data
-          async function fetchUpdatedWarnings() {
-              try {
-                  const response = await fetch(window.location.href.replace('.html', '.json') + '?t=' + Date.now());
-                  if (!response.ok) throw new Error('Failed to fetch updates');
-                  
-                  const data = await response.json();
-                  
-                  if (data.updatedAtUTC && data.updatedAtUTC * 1000 > lastUpdateTime) {
-                      console.log('New data available, updating...');
-                      lastUpdateTime = data.updatedAtUTC * 1000;
-                      warningsData = data.warnings;
-                      updateStats(data);
+           // Fetch updated warnings data directly from NWS API
+           async function fetchUpdatedWarnings() {
+               try {
+                   console.log('Fetching warnings from NWS API...');
+                    const response = await fetch('https://api.weather.gov/alerts/active?_=' + Date.now());
+                   if (!response.ok) throw new Error('Failed to fetch updates: ' + response.status);
+                   
+                   const apiData = await response.json();
+                   
+                   const warnings = [];
+                   for (const feature of apiData.features || []) {
+                       const props = feature.properties;
+                       if (isFilteredWarning(props.event)) continue;
+                       if (isFilteredWords(props.description || '')) continue;
+                       
+                       warnings.push({
+                           id: props.id,
+                           type: props.event,
+                           description: props.description,
+                           area: props.areaDesc,
+                           severity: props.severity,
+                           time: props.sent,
+                           expiresTime: props.expires,
+                           geometry: feature.geometry,
+                           ugc: props.geocode?.UGC || [],
+                           same: props.geocode?.SAME || []
+                       });
+                   }
+                   
+                   console.log('Fetched ' + warnings.length + ' warnings from NWS API');
+                   warningsData = warnings;
+                   lastUpdateTime = Date.now();
+                   
+                   const stats = { counter: warnings.length, updatedAtUTC: Math.floor(Date.now() / 1000) };
+                   updateStats(stats);
 
-                      // Clear layers and redraw in correct order
-                      clearWarningLayers();
-                      
-                      // Fetch MCDs and rebuild map layers
-                      fetchMesoscaleDiscussions().then(features => {
-                          mesoscaleDiscussions = features;
-                          addMesoscaleDiscussionsToMap();
-                          addWarningsToMap();
-                          bringSevereToFront();
-                          addMesoscaleDiscussionsToList();
-                          enrichMCDsWithText();
-                          updateListView(data.warnings);
-                      });
+                   clearWarningLayers();
+                   
+                    fetchMesoscaleDiscussions().then(features => {
+                        console.log('Updating views with warningsData length:', warningsData.length);
+                        mesoscaleDiscussions = features;
+                        addMesoscaleDiscussionsToMap();
+                        addWarningsToMap();
+                        bringSevereToFront();
+                        addMesoscaleDiscussionsToList();
+                        enrichMCDsWithText();
+                        console.log('Calling updateListView with:', warningsData.map(w => w.id));
+                        updateListView(warningsData);
+                    });
 
-                      console.log('Update complete');
-                  } else {
-                      console.log('No new data available');
-                  }
-              } catch (error) {
-                  console.error('Error fetching updates:', error);
-              }
-          }
+                   console.log('Update complete');
+               } catch (error) {
+                   console.error('Error fetching updates:', error);
+               }
+           }
+           
+           function isFilteredWarning(eventType) {
+               const lowercaseEvent = (eventType || '').toLowerCase();
+               
+               if (lowercaseEvent.includes('severe thunderstorm')) return false;
+               if (lowercaseEvent.includes('tornado')) return false;
+               
+               const filteredTypes = [
+                   'storm warning', 'fire warning', 'storm watch', 'freeze watch',
+                   'flood', 'winter weather advisory', 'extreme heat warning',
+                   'frost advisory', 'freeze warning', 'gale warning', 'test message',
+                   'high wind warning', 'wind advisory', 'high wind watch',
+                   'heat advisory', 'dense fog advisory', 'blowing dust advisory',
+                   'dust storm warning', 'small craft advisory', 'red flag warning',
+                   'air quality alert', 'heavy freezing spray warning',
+                   'fire weather watch', 'gale watch', 'blowing dust warning',
+                   'hydrologic outlook', 'marine', 'coastal flood', 'river flood',
+                   'flash flood', 'high surf', 'rip current', 'beach hazard',
+                   'coastal hazard', 'coastal erosion', 'blizzard warning',
+                   'extreme cold watch', 'extreme cold warning',
+                   'hazardous seas warning', 'cold weather advisory',
+                   'avalanche warning', 'avalanche advisory', 'ashfall advisory',
+                   'avalanche watch', 'freezing fog advisory'
+               ];
+               
+               for (const filteredType of filteredTypes) {
+                   if (lowercaseEvent.includes(filteredType)) return true;
+               }
+               return false;
+           }
+           
+           function isFilteredWords(words) {
+               words = words.toLowerCase();
+               return words.includes('fire');
+           }
           
           // Update statistics display
           function updateStats(data) {
