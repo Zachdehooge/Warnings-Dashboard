@@ -83,6 +83,10 @@ func runWatchMode(cmd *cobra.Command) {
 		interval = 30
 	}
 
+	jsonPath := filepath.Join(filepath.Dir(outputFile), "warnings.json")
+	generator.StartPoller(jsonPath, 15*time.Second)
+	cmd.Println(fmt.Sprintf("Poller started — writing %s every 15s", jsonPath))
+
 	cmd.Println(fmt.Sprintf("Watch mode activated. Updating every %d seconds. Press Ctrl+C to stop.", interval))
 
 	ticker := time.NewTicker(time.Duration(interval) * time.Second)
