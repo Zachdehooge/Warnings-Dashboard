@@ -104,10 +104,19 @@ func startHTTPServer(cmd *cobra.Command) {
 	dir := filepath.Dir(outputFile)
 	fs := http.FileServer(http.Dir(dir))
 
+	noCache := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+			h.ServeHTTP(w, r)
+		})
+	}(fs)
+
 	go func() {
 		addr := ":8085"
 		cmd.Println("Starting HTTP server at http://localhost:8085/")
-		err := http.ListenAndServe(addr, fs)
+		err := http.ListenAndServe(addr, noCache)
 		if err != nil {
 			cmd.PrintErrln(fmt.Errorf("failed to start HTTP server: %w", err))
 		}

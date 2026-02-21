@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -38,12 +39,23 @@ type GeoGeometry struct {
 	Coordinates json.RawMessage `json:"coordinates"`
 }
 
+// MesoscaleDiscussionJSON represents an MCD from the NOAA MapServer
+type MesoscaleDiscussionJSON struct {
+	ID        string       `json:"id"`
+	Name      string       `json:"name"`
+	FullText  string       `json:"fullText"`
+	PopupInfo string       `json:"popupInfo"`
+	FileDate  int64        `json:"idp_filedate"`
+	Geometry  *GeoGeometry `json:"geometry"`
+}
+
 // PolledPayload is the full structure written to warnings.json on every poll cycle.
 type PolledPayload struct {
-	Warnings     []WarningJSON `json:"warnings"`
-	LastUpdated  string        `json:"lastUpdated"`
-	Counter      int           `json:"counter"`
-	UpdatedAtUTC int64         `json:"updatedAtUTC"`
+	Warnings             []WarningJSON             `json:"warnings"`
+	MesoscaleDiscussions []MesoscaleDiscussionJSON `json:"mesoscaleDiscussions"`
+	LastUpdated          string                    `json:"lastUpdated"`
+	Counter              int                       `json:"counter"`
+	UpdatedAtUTC         int64                     `json:"updatedAtUTC"`
 }
 
 // StartPoller launches a background goroutine that polls the NWS API every
@@ -71,11 +83,19 @@ func pollAndWrite(outputPath string) error {
 		return fmt.Errorf("fetch failed: %w", err)
 	}
 
+	mCDs, err := fetchMesoscaleDiscussions()
+	if err != nil {
+		log.Printf("[poller] MCD fetch failed: %v", err)
+		mCDs = []MesoscaleDiscussionJSON{}
+	}
+	log.Printf("DEBUG: mCDs slice len=%d, cap=%d", len(mCDs), cap(mCDs))
+
 	payload := PolledPayload{
-		Warnings:     warnings,
-		LastUpdated:  time.Now().UTC().Format("Jan 2, 2006 at 03:04:01 UTC"),
-		Counter:      len(warnings),
-		UpdatedAtUTC: time.Now().UTC().Unix(),
+		Warnings:             warnings,
+		MesoscaleDiscussions: mCDs,
+		LastUpdated:          time.Now().UTC().Format("Jan 2, 2006 at 03:04:01 UTC"),
+		Counter:              len(warnings),
+		UpdatedAtUTC:         time.Now().UTC().Unix(),
 	}
 
 	data, err := json.Marshal(payload)
@@ -211,6 +231,126 @@ func fetchAllAlerts() ([]WarningJSON, error) {
 		all = []WarningJSON{}
 	}
 	return all, nil
+}
+
+func fetchMesoscaleDiscussions() ([]MesoscaleDiscussionJSON, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	mcdURL := "https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/spc_mesoscale_discussion/MapServer/0/query"
+	req, err := http.NewRequest("GET", mcdURL+"?where=1=1&outFields=name,folderpath,popupinfo,idp_filedate&f=geojson", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("MCD MapServer fetch failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("MCD MapServer returned HTTP %d", resp.StatusCode)
+	}
+
+	var geoResp struct {
+		Features []struct {
+			Geometry   *GeoGeometry `json:"geometry"`
+			Properties struct {
+				Name       string `json:"name"`
+				FolderPath string `json:"folderpath"`
+				PopupInfo  string `json:"popupinfo"`
+				FileDate   int64  `json:"idp_filedate"`
+			} `json:"properties"`
+		} `json:"features"`
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read MCD response: %w", err)
+	}
+
+	if err := json.Unmarshal(body, &geoResp); err != nil {
+		return nil, fmt.Errorf("failed to parse MCD JSON: %w", err)
+	}
+
+	var mCDs []MesoscaleDiscussionJSON
+	year := time.Now().Year()
+
+	for _, f := range geoResp.Features {
+		if f.Geometry == nil {
+			continue
+		}
+
+		props := f.Properties
+		mcdNum := strings.TrimPrefix(props.Name, "MD ")
+		if mcdNum == "" {
+			continue
+		}
+
+		fullText, err := fetchMCDText(year, mcdNum)
+		if err != nil {
+			log.Printf("[mcd] failed to fetch text for MCD %s: %v", mcdNum, err)
+		}
+
+		mCDs = append(mCDs, MesoscaleDiscussionJSON{
+			ID:        "MCD " + mcdNum,
+			Name:      props.Name,
+			FullText:  fullText,
+			PopupInfo: props.PopupInfo,
+			FileDate:  props.FileDate,
+			Geometry:  f.Geometry,
+		})
+	}
+
+	if mCDs == nil {
+		mCDs = []MesoscaleDiscussionJSON{}
+	}
+	return mCDs, nil
+}
+
+func fetchMCDText(year int, mcdNum string) (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	url := fmt.Sprintf("https://www.spc.noaa.gov/products/md/%d/md%s.html", year, mcdNum)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "warnings-dashboard/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	re := regexp.MustCompile(`(?s)<pre[^>]*>(.*?)</pre>`)
+	matches := re.FindSubmatch(body)
+	if len(matches) < 2 {
+		return "", nil
+	}
+
+	text := string(matches[1])
+	text = strings.ReplaceAll(text, "<br>", "\n")
+	text = strings.ReplaceAll(text, "<br/>", "\n")
+	text = strings.ReplaceAll(text, "<br />", "\n")
+	reTag := regexp.MustCompile(`<[^>]+>`)
+	text = reTag.ReplaceAllString(text, "")
+	text = strings.ReplaceAll(text, "&amp;", "&")
+	text = strings.ReplaceAll(text, "&lt;", "<")
+	text = strings.ReplaceAll(text, "&gt;", ">")
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+
+	return text, nil
 }
 
 // GenerateWarningsHTML creates an HTML file with weather warnings
@@ -353,13 +493,12 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           let map;
           let warningsData = {{ .WarningsJSON }};
           let countyBoundaries = null;
-          let warningLayers = [];
-          let mesoscaleDiscussions = [];
-          let validMCDs = [];
-          let lastUpdateTime = Date.now();
-          let mcdFetchInProgress = false;
+           let warningLayers = [];
+           let mesoscaleDiscussions = [];
+           let validMCDs = [];
+           let lastUpdateTime = Date.now();
 
-          // ------------------------------------------------------------------
+           // ------------------------------------------------------------------
           // POLL: read warnings.json written by the Go poller every 15 seconds.
           // Fast (local file), no CORS issues, no NWS rate limits.
           // ------------------------------------------------------------------
@@ -377,28 +516,30 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       !w.expiresTime || new Date(w.expiresTime).getTime() > now
                   );
 
+                  // Read MCDs from the server-written JSON
+                  mesoscaleDiscussions = (payload.mesoscaleDiscussions || []).map(mcd => ({
+                      type: 'Feature',
+                      geometry: mcd.geometry,
+                      properties: {
+                          name: mcd.name,
+                          folderpath: '',
+                          popupinfo: mcd.popupInfo,
+                          idp_filedate: mcd.idp_filedate,
+                          _fullText: mcd.fullText || ''
+                      }
+                  }));
+                  console.log('[poll] MCDs from server: ' + mesoscaleDiscussions.length);
+
                   lastUpdateTime = Date.now();
                   updateStats({ counter: warningsData.length, updatedAtUTC: payload.updatedAtUTC });
 
-                  // Update map and list immediately — no waiting on slow MCD fetch
                   clearWarningLayers();
                   addMesoscaleDiscussionsToMap();
                   addWarningsToMap();
                   bringSevereToFront();
+                  addMesoscaleDiscussionsToList();
                   updateListView(warningsData);
                   console.log('[poll] map and list updated with ' + warningsData.length + ' warnings');
-
-                  // Refresh MCDs in background — does not block warning display
-                  fetchMesoscaleDiscussions().then(features => {
-                      mesoscaleDiscussions = features;
-                      addMesoscaleDiscussionsToMap();
-                      addWarningsToMap();
-                      bringSevereToFront();
-                      addMesoscaleDiscussionsToList();
-                      console.log('[poll] MCD refresh complete');
-                  }).catch(err => {
-                      console.error('[poll] MCD fetch failed (warnings still updated):', err);
-                  });
 
               } catch (error) {
                   console.error('[poll] error reading warnings.json:', error);
@@ -406,55 +547,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           }
 
           // ------------------------------------------------------------------
-          // Fetch Mesoscale Discussions from the NOAA ArcGIS MapServer
+          // Strip Z coordinate from GeoJSON geometry
           // ------------------------------------------------------------------
-          async function fetchMesoscaleDiscussions() {
-              if (mcdFetchInProgress) return;
-              mcdFetchInProgress = true;
-              try {
-                  const base = 'https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/spc_mesoscale_discussion/MapServer/0/query';
-                  const params = new URLSearchParams({
-                      where: '1=1', outFields: 'name,folderpath,popupinfo,idp_filedate',
-                      f: 'geojson', _: Date.now()
-                  });
-                  const response = await fetch(base + '?' + params);
-                  if (!response.ok) throw new Error('SPC MapServer fetch failed: ' + response.status);
-
-                  const data = await response.json();
-                  const features = (data.features || []).filter(f => f.geometry && f.geometry.coordinates);
-                  console.log('SPC MapServer MCDs (active):', features.length);
-
-                  features.forEach(feature => { feature.geometry = stripZ(feature.geometry); });
-
-                  await Promise.all(features.map(async (feature) => {
-                      const props = feature.properties || {};
-                      const mcdNum = extractMCDNumber(props);
-                      const spcUrl = mcdSPCLink(mcdNum);
-                      try {
-                          const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(spcUrl);
-                          const r = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
-                          if (!r.ok) throw new Error('proxy HTTP ' + r.status);
-                          const html = await r.text();
-                          const preMatch = html.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-                          if (preMatch) {
-                              feature.properties._fullText = preMatch[1]
-                                  .replace(/<[^>]+>/g, '').replace(/&amp;/g,'&')
-                                  .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&nbsp;/g,' ').trim();
-                          }
-                      } catch (e) {
-                          console.warn('MCD #' + mcdNum + ' scrape failed:', e.message);
-                      }
-                  }));
-
-                  return features;
-              } catch (error) {
-                  console.error('Error fetching SPC MCDs:', error);
-                  return [];
-              } finally {
-                  mcdFetchInProgress = false;
-              }
-          }
-
           function stripZ(geometry) {
               if (!geometry) return geometry;
               const strip2D = coords => coords.map(c => [c[0], c[1]]);
@@ -574,10 +668,36 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           }
 
           function updateStats(data) {
+              console.log('updateStats called with counter:', data.counter);
               if (data.updatedAtUTC) updateLastUpdatedTime(data.updatedAtUTC);
               document.querySelectorAll('h4').forEach(el => {
                   if (el.textContent.startsWith('Warnings:')) el.textContent = 'Warnings: ' + data.counter;
               });
+              updateWarningTypeCounts();
+          }
+
+          function updateWarningTypeCounts() {
+              const typeCounts = {};
+              warningsData.forEach(w => {
+                  if (!w.type) return;
+                  if (!typeCounts[w.type]) typeCounts[w.type] = 0;
+                  typeCounts[w.type]++;
+              });
+              const warningTypesDiv = document.getElementById('top');
+              if (!warningTypesDiv) return;
+              const types = Object.keys(typeCounts).sort();
+              if (types.length === 0) {
+                  warningTypesDiv.innerHTML = '';
+                  return;
+              }
+              let html = '';
+              types.forEach(type => {
+                  const count = typeCounts[type];
+                  const severityClass = getWarningSeverityClass({ type: type, severity: '' });
+                  html += '<div class="warning-type ' + severityClass + '">' +
+                      '<a href="#' + encodeURIComponent(type) + '">' + type + '</a>: <span class="type-count">' + count + '</span></div>';
+              });
+              warningTypesDiv.innerHTML = html;
           }
 
           // ------------------------------------------------------------------
@@ -750,21 +870,32 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               const initialTimestamp = {{ .UpdatedAtUTC }};
               if (initialTimestamp) updateLastUpdatedTime(initialTimestamp);
 
-              // Countdown display
+              // Countdown display - synchronized with fetch
+              const refreshInterval = 15000;
               let refreshTime = 15;
               const countdownElements = document.querySelectorAll('.countdown');
+              
+              function updateCountdown() {
+                  countdownElements.forEach(el => el.textContent = refreshTime + 's');
+              }
+              
               setInterval(function() {
                   refreshTime--;
                   if (refreshTime <= 0) {
                       countdownElements.forEach(el => el.textContent = 'Updating...');
-                      refreshTime = 15;
                   } else {
-                      countdownElements.forEach(el => el.textContent = refreshTime + 's');
+                      updateCountdown();
                   }
               }, 1000);
+              updateCountdown();
 
               // Poll warnings.json every 15 seconds
-              setInterval(fetchUpdatedWarnings, 15000);
+              setInterval(function() {
+                  refreshTime = 15;
+                  updateCountdown();
+                  fetchUpdatedWarnings();
+              }, refreshInterval);
+              fetchUpdatedWarnings(); // Fetch immediately on page load
 
               const backToTopButton = document.querySelector('.back-to-top');
               window.addEventListener('scroll', function() {
@@ -789,6 +920,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                       document.querySelectorAll('h4').forEach(el => {
                           if (el.textContent.startsWith('Warnings:')) el.textContent = 'Warnings: ' + warningsData.length;
                       });
+                      updateWarningTypeCounts();
                   }
                   updateAllExpirationCountdowns();
               }, 1000);
@@ -848,15 +980,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
               addWarningsToMap();
               updateListView(warningsData);
 
-              // MCDs in background
-              fetchMesoscaleDiscussions().then(features => {
-                  mesoscaleDiscussions = features;
-                  addMesoscaleDiscussionsToMap();
-                  addWarningsToMap();
-                  bringSevereToFront();
-                  addMesoscaleDiscussionsToList();
-              }).catch(err => console.error('Initial MCD fetch failed:', err));
-
               loadCountyBoundaries();
           }
 
@@ -866,7 +989,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           }
 
           function addMesoscaleDiscussionsToMap() {
-              if (mesoscaleDiscussions.length === 0) return;
+              if (!mesoscaleDiscussions || mesoscaleDiscussions.length === 0) return;
               validMCDs = mesoscaleDiscussions.filter(mcd => extractMCDNumber(mcd.properties || {}) !== '????');
               if (validMCDs.length === 0) return;
 
@@ -1054,7 +1177,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        <div class="warning-types" id="top">
           {{ range .WarningTypeCounts }}
              <div class="warning-type{{ if eq .Severity "Severe" }} severe{{ else if eq .Severity "Moderate" }} moderate{{ else if eq .Severity "Extreme" }} severe{{ else if eq .Severity "Minor" }}{{ else }} watch{{ end }}">
-               <a href="#{{ .Type | urlquery }}">{{ .Type }}</a>: {{ .Count }}
+               <a href="#{{ .Type | urlquery }}">{{ .Type }}</a>: <span class="type-count">{{ .Count }}</span>
              </div>
           {{ end }}
        </div>
@@ -1069,7 +1192,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        <h4>Warnings: {{ .Counter }}</h4>
        <h4>Mesoscale Discussions: <span id="mcd-total-count">0</span></h4>
        <h4 id="last-updated">Last updated: <span id="last-updated-time">{{ .LastUpdated }}</span></h4>
-       <div class="next-refresh">Next refresh in <span class="countdown">15s</span> &nbsp;&middot;&nbsp; Expired warnings removed instantly</div>
+       <div class="next-refresh">Next refresh in <span class="countdown">15s</span></div>
 
        <div id="map-section" style="margin-bottom:30px;">
           <button onclick="showDebugInfo()" style="margin-bottom:10px;padding:5px 10px;background-color:var(--header-bg);color:var(--text-color);border:1px solid var(--header-border);border-radius:3px;cursor:pointer;">Show Debug Info</button>
@@ -1136,19 +1259,21 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
 	}
 
 	data := struct {
-		Warnings          []TemplateWarning
-		LastUpdated       string
-		Counter           int
-		WarningTypeCounts []TypeCount
-		WarningsJSON      template.JS
-		UpdatedAtUTC      int64
+		Warnings                 []TemplateWarning
+		LastUpdated              string
+		Counter                  int
+		WarningTypeCounts        []TypeCount
+		WarningsJSON             template.JS
+		MesoscaleDiscussionsJSON template.JS
+		UpdatedAtUTC             int64
 	}{
-		Warnings:          convertWarnings(warnings),
-		LastUpdated:       time.Now().UTC().Format("Jan 2, 2006 at 03:04:01 UTC"),
-		Counter:           len(warnings),
-		WarningTypeCounts: sortedWarningTypeCounts(warnings),
-		WarningsJSON:      template.JS(warningsJSON),
-		UpdatedAtUTC:      time.Now().UTC().Unix(),
+		Warnings:                 convertWarnings(warnings),
+		LastUpdated:              time.Now().UTC().Format("Jan 2, 2006 at 03:04:01 UTC"),
+		Counter:                  len(warnings),
+		WarningTypeCounts:        sortedWarningTypeCounts(warnings),
+		WarningsJSON:             template.JS(warningsJSON),
+		MesoscaleDiscussionsJSON: template.JS("[]"),
+		UpdatedAtUTC:             time.Now().UTC().Unix(),
 	}
 
 	var buf bytes.Buffer
