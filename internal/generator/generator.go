@@ -969,7 +969,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   opacity: 0.5,
                   maxZoom: 12,
                   attribution: 'Radar data &copy; Iowa Environmental Mesonet'
-              });
+              }).addTo(map);
 
                // Layer control for toggling radar only
                const overlays = {
