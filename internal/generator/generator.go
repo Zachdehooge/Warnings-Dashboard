@@ -1542,23 +1542,23 @@ radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexr
       <h1>US Weather Warnings</h1>
       <div class="status-summary">
          <div class="status-item tornado">
-            <span>🔴</span>
-            <span>Tornado</span>
+            <span>🌪️</span>
+            <span>Tornado Warning</span>
              <span class="count" id="count-tornado">0</span>
           </div>
           <div class="status-item tstorm">
              <span>⚡</span>
-             <span>T-Storm</span>
+             <span>T-Storm Warning</span>
              <span class="count" id="count-tstorm">0</span>
           </div>
           <div class="status-item tornado-watch">
              <span>🌪</span>
-             <span>T.Watch</span>
+             <span>Tornado Watch</span>
              <span class="count" id="count-tornado-watch">0</span>
           </div>
           <div class="status-item watch">
              <span>⚡</span>
-             <span>STW</span>
+             <span>T-Storm Watch</span>
              <span class="count" id="count-watch">0</span>
           </div>
           <div class="status-item sps">
