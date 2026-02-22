@@ -430,19 +430,21 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          letter-spacing: 2px;
       }
       .status-summary {
-         display: flex;
-         gap: 20px;
-         align-items: center;
-      }
-      .status-item {
-         display: flex;
-         align-items: center;
-         gap: 8px;
-         padding: 6px 14px;
-         border-radius: 6px;
-         font-size: 16px;
-         font-weight: 600;
-      }
+          display: flex;
+          gap: 20px;
+          align-items: center;
+          flex-shrink: 0;
+       }
+       .status-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 14px;
+          border-radius: 6px;
+          font-size: 16px;
+          font-weight: 600;
+          flex-shrink: 0;
+       }
        .status-item.tornado { background: var(--tornado-bg); border: 1px solid var(--tornado-color); color: var(--tornado-color); }
        .status-item.tstorm { background: var(--tstorm-bg); border: 1px solid var(--tstorm-color); color: var(--tstorm-color); }
        .status-item.tornado-watch { background: var(--tornado-watch-bg); border: 1px solid var(--tornado-watch-color); color: var(--tornado-watch-color); }
@@ -490,12 +492,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        .status-item .count { font-size: 20px; font-weight: 700; }
       
       .status-time {
-         display: flex;
-         align-items: center;
-         gap: 15px;
-         font-size: 14px;
-         color: var(--text-muted);
-      }
+          display: flex;
+          align-items: center;
+          gap: 15px;
+          font-size: 14px;
+          color: var(--text-muted);
+          flex-shrink: 0;
+       }
       .status-time .countdown { color: #fff; font-weight: 600; }
       
        .main-container {
@@ -508,11 +511,12 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        }
       
       .map-panel {
-         flex: 0 0 60%;
-         position: relative;
-         border-right: 1px solid #222;
-         display: block;
-      }
+          flex: 0 0 60%;
+          position: relative;
+          border-right: 1px solid #222;
+          display: block;
+          overflow: hidden;
+       }
       #map {
          height: 100%;
          width: 100%;
@@ -754,6 +758,26 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          .status-bar h1 { font-size: 16px; }
       }
       
+      @media (min-width: 1025px) {
+         .status-summary, .status-item, .status-time {
+            flex-shrink: 0;
+         }
+         .map-panel {
+            overflow: hidden;
+         }
+         .status-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+         }
+         .main-container {
+            margin-top: 60px;
+            height: calc(100vh - 60px);
+         }
+      }
+      
        @media (max-width: 600px) {
          body { 
             font-size: 14px; 
@@ -821,10 +845,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             border-radius: 10px;
             font-size: 12px;
          }
-         .mobile-tab.active .tab-count {
-            background: #00aa00;
-            color: #000;
-         }
+          .mobile-tab.active .tab-count {
+             background: #00aa00;
+             color: #000;
+          }
+          #tab-map .tab-count {
+             display: none;
+          }
          
           .main-container {
              flex: 1 1 auto;
@@ -954,7 +981,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             console.log('[poll] MCDs from server: ' + mesoscaleDiscussions.length);
 
             lastUpdateTime = Date.now();
-            updateStats({ counter: warningsData.length, updatedAtUTC: payload.updatedAtUTC });
 
             clearWarningLayers();
             addMesoscaleDiscussionsToMap();
@@ -962,6 +988,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             bringSevereToFront();
             addMesoscaleDiscussionsToList();
             updateListView(warningsData);
+            updateStats({ counter: warningsData.length, updatedAtUTC: payload.updatedAtUTC });
             console.log('[poll] map and list updated with ' + warningsData.length + ' warnings');
 
          } catch (error) {
@@ -1356,13 +1383,17 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                html += '</div>';
             });
             
-            const mcdCountEl = document.getElementById('mcd-count');
-            const mcdStatusEl = document.getElementById('mcd-status');
-            if (mcdCountEl) mcdCountEl.textContent = validMCDs.length;
-            if (mcdStatusEl) {
-               mcdStatusEl.classList.add('active');
-            }
-         }
+             const mcdCountEl = document.getElementById('mcd-count');
+             const mcdStatusEl = document.getElementById('mcd-status');
+             if (mcdCountEl) mcdCountEl.textContent = validMCDs.length;
+             if (mcdStatusEl) {
+                mcdStatusEl.classList.add('active');
+             }
+             
+             const totalCount = warnings.length + validMCDs.length;
+             const tabListCount = document.getElementById('tab-list-count');
+             if (tabListCount) tabListCount.textContent = totalCount;
+          }
          
          if (warnings.length === 0 && (!validMCDs || validMCDs.length === 0)) {
             listSection.innerHTML = '<div class="no-warnings">No active weather warnings</div>';
