@@ -755,11 +755,23 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       }
       
        @media (max-width: 600px) {
-         body { font-size: 14px; }
+         body { 
+            font-size: 14px; 
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+         }
+         html {
+            overflow: auto;
+            height: 100%;
+         }
          .status-bar {
             flex-direction: column;
             gap: 8px;
             padding: 10px;
+            position: relative;
+            z-index: 1001;
          }
          .status-bar h1 { 
             font-size: 14px; 
@@ -783,6 +795,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             display: flex;
             background: #1a1a1a;
             border-bottom: 1px solid #333;
+            position: relative;
+            z-index: 1001;
          }
          .mobile-tab {
             flex: 1;
@@ -812,30 +826,54 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             color: #000;
          }
          
-         .main-container {
-            flex-direction: column;
-            height: calc(100vh - 110px);
-         }
+          .main-container {
+             flex: 1 1 auto;
+             flex-direction: column;
+             min-height: 0;
+             overflow: hidden;
+             display: flex;
+             position: relative;
+             z-index: 1;
+          }
+          .main-container > * {
+             flex: 1 1 auto;
+             min-height: 0;
+             overflow: hidden;
+          }
           .map-panel {
-             flex: 1;
+             flex: 1 1 auto;
              border-right: none;
              border-bottom: none;
              display: none;
+             height: 100%;
+             min-height: 0;
+             overflow: hidden;
           }
           .map-panel #map {
              touch-action: none;
+             height: 100%;
+             width: 100%;
+             position: absolute;
+             top: 0;
+             left: 0;
           }
            .warning-panel {
-              flex: 1;
+              flex: 1 1 auto;
               min-height: 0;
               display: flex;
               overflow-y: auto;
               -webkit-overflow-scrolling: touch;
+              height: 100%;
            }
-          .main-container.show-map .map-panel { display: block; }
+          .main-container.show-map .map-panel { display: block; flex: 1; }
           .main-container.show-map .warning-panel { display: none; }
           .main-container.show-list .map-panel { display: none; }
-          .main-container.show-list .warning-panel { display: flex; }
+          .main-container.show-list .warning-panel { display: flex; flex: 1; }
+          
+          .leaflet-control-reset-map {
+             display: none;
+          }
+          
           .warning-card {
             padding: 12px;
          }
@@ -1111,21 +1149,30 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
            if (tabListCount) tabListCount.textContent = totalCount;
         }
         
-        function switchTab(tab) {
-           const mainContainer = document.querySelector('.main-container');
-           const tabMap = document.getElementById('tab-map');
-           const tabList = document.getElementById('tab-list');
-           if (!mainContainer || !tabMap || !tabList) return;
-           
-           mainContainer.classList.remove('show-map', 'show-list');
-           mainContainer.classList.add('show-' + tab);
-           tabMap.classList.toggle('active', tab === 'map');
-           tabList.classList.toggle('active', tab === 'list');
-           
-           if (tab === 'map' && map) {
-              setTimeout(() => map.invalidateSize(), 100);
-           }
-        }
+         function switchTab(tab) {
+            const mainContainer = document.querySelector('.main-container');
+            const tabMap = document.getElementById('tab-map');
+            const tabList = document.getElementById('tab-list');
+            if (!mainContainer || !tabMap || !tabList) return;
+            
+            mainContainer.classList.remove('show-map', 'show-list');
+            mainContainer.classList.add('show-' + tab);
+            tabMap.classList.toggle('active', tab === 'map');
+            tabList.classList.toggle('active', tab === 'list');
+            
+            if (tab === 'map' && map) {
+               setTimeout(() => {
+                  if (map) map.invalidateSize();
+               }, 100);
+            }
+            
+            if (tab === 'list') {
+               const listSection = document.getElementById('warnings-list');
+               if (listSection && listSection.innerHTML === '') {
+                  updateListView(warningsData);
+               }
+            }
+         }
 
        function addMesoscaleDiscussionsToList() {
          const container = document.getElementById('mcd-cards-container');
@@ -1184,6 +1231,11 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       }
 
       function zoomToMCD(index) {
+         const isMobile = window.innerWidth <= 600;
+         if (isMobile) {
+            switchTab('map');
+         }
+         
          const mcd = validMCDs[index];
          if (!mcd || !mcd.geometry) return;
          const mcdNum = extractMCDNumber(mcd.properties || {});
@@ -1199,7 +1251,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                setTimeout(() => {
                   const layer = warningLayers.find(l => l._popup && l._popup._content && l._popup._content.includes('MCD #' + mcdNum));
                   if (layer) layer.openPopup();
-               }, 500);
+               }, isMobile ? 600 : 500);
             }
          } catch (e) { console.error('Error zooming to MCD:', e); }
       }
@@ -1344,6 +1396,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          let refreshTime = 15;
          const countdownElements = document.querySelectorAll('.countdown');
          
+         const isMobile = window.innerWidth <= 600;
+         if (isMobile) {
+            setTimeout(() => {
+               if (map) map.invalidateSize();
+            }, 500);
+         }
+         
          function updateCountdown() {
             countdownElements.forEach(el => el.textContent = refreshTime + 's');
          }
@@ -1385,13 +1444,18 @@ setInterval(function() {
       };
 
       function zoomToWarning(warningId) {
+         const isMobile = window.innerWidth <= 600;
+         if (isMobile) {
+            switchTab('map');
+         }
+         
          const warning = warningsData.find(w => w.id === warningId);
          if (!warning) return;
          const layer = warningLayers.find(l => l._popup && l._popup._content &&
             l._popup._content.includes(warning.type) && l._popup._content.includes(warning.area));
          if (layer && layer.getBounds) {
             map.fitBounds(layer.getBounds(), { padding:[50,50] });
-            setTimeout(() => layer.openPopup(), 500);
+            setTimeout(() => layer.openPopup(), isMobile ? 600 : 500);
          } else if (warning.geometry && warning.geometry.coordinates) {
             try {
                const coords = warning.geometry.type === 'Polygon'
