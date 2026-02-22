@@ -398,8 +398,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          --severe-bg: #2a0f0f;
          --moderate-color: #FFAA00;
          --moderate-bg: #2a1f0a;
-         --mcd-color: #00FFFF;
-         --mcd-bg: #0a2a2a;
+          --mcd-color: #8866ff;
+          --mcd-bg: #1a1a2a;
          
          --countdown-urgent: #FF0000;
          --countdown-warning: #FFAA00;
@@ -447,7 +447,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        .status-item.tstorm { background: var(--tstorm-bg); border: 1px solid var(--tstorm-color); color: var(--tstorm-color); }
        .status-item.tornado-watch { background: var(--tornado-watch-bg); border: 1px solid var(--tornado-watch-color); color: var(--tornado-watch-color); }
        .status-item.watch { background: var(--watch-bg); border: 1px solid var(--watch-color); color: var(--watch-color); }
-       .status-item.sps { background: #1a1a2a; border: 1px solid #8866ff; color: #8866ff; }
+       .status-item.sps { background: #1a2a3a; border: 1px solid #66B2FF; color: #66B2FF; }
        .status-item.mcd { background: var(--mcd-bg); border: 1px solid var(--mcd-color); color: var(--mcd-color); }
        .status-item.tornado.active { animation: tornadoPulse 2s infinite; }
        .status-item.tstorm.active { animation: tstormPulse 2s infinite; }
@@ -472,12 +472,12 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           50% { box-shadow: 0 0 0 8px rgba(255, 165, 0, 0); }
        }
        @keyframes spsPulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(136, 102, 255, 0.4); }
-          50% { box-shadow: 0 0 0 8px rgba(136, 102, 255, 0); }
+          0%, 100% { box-shadow: 0 0 0 0 rgba(102, 178, 255, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(102, 178, 255, 0); }
        }
        @keyframes mcdPulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 255, 0.4); }
-          50% { box-shadow: 0 0 0 8px rgba(0, 255, 255, 0); }
+          0%, 100% { box-shadow: 0 0 0 0 rgba(136, 102, 255, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(136, 102, 255, 0); }
        }
        @keyframes tstormPulse {
           0%, 100% { box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.4); }
@@ -487,15 +487,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           0%, 100% { box-shadow: 0 0 0 0 rgba(255, 165, 0, 0.4); }
           50% { box-shadow: 0 0 0 8px rgba(255, 165, 0, 0); }
        }
-       @keyframes spsPulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(136, 102, 255, 0.4); }
-          50% { box-shadow: 0 0 0 8px rgba(136, 102, 255, 0); }
-       }
-       @keyframes mcdPulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 255, 0.4); }
-          50% { box-shadow: 0 0 0 8px rgba(0, 255, 255, 0); }
-       }
-      .status-item .count { font-size: 20px; font-weight: 700; }
+       .status-item .count { font-size: 20px; font-weight: 700; }
       
       .status-time {
          display: flex;
@@ -665,11 +657,12 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       .warning-card.tornado { background: var(--tornado-bg); border-color: var(--tornado-color); }
       .warning-card.tstorm { background: var(--tstorm-bg); border-color: var(--tstorm-color); }
       .warning-card.tornado-watch { background: var(--tornado-watch-bg); border-color: var(--tornado-watch-color); }
-      .warning-card.watch { background: var(--watch-bg); border-color: var(--watch-color); }
-      .warning-card.severe { background: var(--severe-bg); border-color: var(--severe-color); }
-      .warning-card.moderate { background: var(--moderate-bg); border-color: var(--moderate-color); }
-      
-      .warning-card-header {
+       .warning-card.watch { background: var(--watch-bg); border-color: var(--watch-color); }
+       .warning-card.severe { background: var(--severe-bg); border-color: var(--severe-color); }
+       .warning-card.moderate { background: var(--moderate-bg); border-color: var(--moderate-color); }
+       .warning-card.sps { background: #1a2a3a; border-color: #66B2FF; }
+       
+       .warning-card-header {
          display: flex;
          justify-content: space-between;
          align-items: flex-start;
@@ -702,9 +695,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       .warning-card.tornado-watch h3 { color: var(--tornado-watch-color); }
       .warning-card.watch h3 { color: var(--watch-color); }
       .warning-card.severe h3 { color: var(--severe-color); }
-      .warning-card.moderate h3 { color: var(--moderate-color); }
-      
-      .warning-card .area {
+       .warning-card.moderate h3 { color: var(--moderate-color); }
+       .warning-card.sps h3 { color: #66B2FF; }
+       
+       .warning-card .area {
          font-size: 16px;
          font-weight: 500;
          color: #fff;
@@ -1155,6 +1149,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          if (t.includes('tornado') && t.includes('watch')) return 'tornado-watch';
          if ((t.includes('thunderstorm')||t.includes('t-storm')||t.includes('tstorm')) && t.includes('watch')) return 'watch';
          if (t.includes('thunderstorm warning')||t.includes('t-storm warning')||t.includes('tstorm warning')) return 'tstorm';
+         if (t.includes('special weather statement')) return 'sps';
          return getSeverityClassJS(warning.severity);
       }
 
@@ -1430,6 +1425,7 @@ radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexr
          if (t.includes('tornado')&&t.includes('watch')) return '#FFFF00';
          if (t.includes('thunderstorm warning')||t.includes('t-storm warning')||t.includes('tstorm warning')) return '#FF0000';
          if ((t.includes('thunderstorm')||t.includes('t-storm')||t.includes('tstorm'))&&t.includes('watch')) return '#FFA500';
+         if (t.includes('special weather statement')) return '#66B2FF';
          if (severity==='Severe'||severity==='Extreme') return '#FF4444';
          if (severity==='Moderate') return '#FFAA00';
          return '#666666';
