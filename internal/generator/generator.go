@@ -496,6 +496,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       .leaflet-control-layers-toggle { background-color: var(--card-bg); }
       .leaflet-control-attribution { background-color: rgba(18, 18, 18, 0.8) !important; color: #888 !important; }
       .leaflet-control-attribution a { color: #aaa !important; }
+      .leaflet-popup-content-wrapper { background-color: var(--card-bg); color: var(--text-color); }
+      .leaflet-popup-tip { background-color: var(--card-bg); }
+      .leaflet-popup-content a { color: #00aaaa !important; }
+      .leaflet-popup-close-button { color: var(--text-color) !important; }
 
       .warning-panel {
          flex: 0 0 40%;
@@ -1317,7 +1321,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   if (pt) bodyHtml = '<p style="font-size:0.9em;max-height:200px;overflow-y:auto;">' + escapeHtml(pt.substring(0,800)) + (pt.length>800?'…':'') + '</p>';
                }
 
-               let popupContent = '<div style="color:#000;min-width:200px;max-width:280px;font-size:13px;">' +
+               let popupContent = '<div style="min-width:200px;max-width:280px;font-size:13px;">' +
                   '<h3 style="margin:0 0 6px 0;font-size:14px;color:#006666;">MCD #' + mcdNum + '</h3>' +
                   '<p style="margin:3px 0;"><strong>Issued:</strong> ' + escapeHtml(issued) + '</p>';
                if (expire) popupContent += '<p style="margin:3px 0;"><strong>Expires:</strong> ' + escapeHtml(formatExpireToLocal(expire, props._fullText)) + '</p>';
@@ -1378,8 +1382,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          const polygon = L.polygon(latLngs, { color, fillColor:color, fillOpacity:0.3, weight:2, opacity:0.8 }).addTo(map);
          polygon.warningSeverity = warning.severity;
          warningLayers.push(polygon);
-         const popup = '<div style="color:#000;min-width:200px;max-width:280px;font-size:13px;">' +
-            '<h3 style="margin:0 0 8px 0;font-size:14px;">' + (warning.type||'Unknown') + '</h3>' +
+          const popup = '<div style="min-width:200px;max-width:280px;font-size:13px;">' +
+             '<h3 style="margin:0 0 8px 0;font-size:14px;">' + (warning.type||'Unknown') + '</h3>' +
             '<p style="margin:3px 0;"><strong>Severity:</strong> ' + (warning.severity||'Unknown') + '</p>' +
             '<p style="margin:3px 0;"><strong>Area:</strong> ' + (warning.area||'Unknown') + '</p>' +
             '<p style="margin:3px 0;"><strong>Expires:</strong> ' + formatTime(warning.expiresTime) + '</p>' +
@@ -1401,8 +1405,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                      style:{color,fillColor:color,fillOpacity:0.15,weight:2,opacity:0.6,dashArray:'5, 5'}
                   }).addTo(map);
                   warningLayers.push(layer);
-                  const popup = '<div style="color:#000;min-width:250px;max-width:400px;">' +
-                     '<h3 style="margin-top:0;">' + (warning.type||'Unknown') + '</h3>' +
+                   const popup = '<div style="min-width:250px;max-width:400px;">' +
+                      '<h3 style="margin-top:0;">' + (warning.type||'Unknown') + '</h3>' +
                      '<p style="margin:3px 0;"><strong>Severity:</strong> ' + (warning.severity||'Unknown') + '</p>' +
                      '<p style="margin:3px 0;"><strong>Area:</strong> ' + (warning.area||'Unknown') + '</p>' +
                      '<p style="margin:3px 0;"><strong>Expires:</strong> ' + formatTime(warning.expiresTime) + '</p>' +
