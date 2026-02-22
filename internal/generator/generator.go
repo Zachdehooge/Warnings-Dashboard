@@ -1137,7 +1137,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       function renderWarningsList(warnings) {
          const byType = {};
          warnings.forEach(w => { if (!byType[w.type]) byType[w.type]=[]; byType[w.type].push(w); });
-         const typeOrder = ['Tornado Warning','Severe Thunderstorm Warning','Tornado Watch','Severe Thunderstorm Watch'];
+         const typeOrder = ['Tornado Warning','Severe Thunderstorm Warning','Tornado Watch','Severe Thunderstorm Watch','Flash Flood Warning','Special Weather Statement'];
          const sortedTypes = Object.keys(byType).sort((a,b) => {
             const ia = typeOrder.indexOf(a), ib = typeOrder.indexOf(b);
             if (ia!==-1&&ib!==-1) return ia-ib;
@@ -1149,12 +1149,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             return '<div class="no-warnings">No active weather warnings</div>';
          }
          
-         let html = '';
-         sortedTypes.forEach(type => {
-            const sc = getWarningSeverityClass(byType[type][0]);
-            html += '<div class="warning-type-header ' + sc + '" id="' + encodeURIComponent(type) + '"><h2>' + type + ' (' + byType[type].length + ')</h2></div>';
-            byType[type].forEach(w => { html += renderWarningCard(w); });
-         });
+          let html = '';
+          sortedTypes.forEach(type => {
+             const sc = getWarningSeverityClass(byType[type][0]);
+             const sorted = [...byType[type]].sort((a,b) => new Date(a.expiresTime||0) - new Date(b.expiresTime||0));
+             html += '<div class="warning-type-header ' + sc + '" id="' + encodeURIComponent(type) + '"><h2>' + type + ' (' + byType[type].length + ')</h2></div>';
+             sorted.forEach(w => { html += renderWarningCard(w); });
+          });
          return html;
       }
 
@@ -1380,15 +1381,15 @@ radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexr
 
       function addWarningsToMap() {
          let added=0, skipped=0, fallback=0;
-         const valid = warningsData.filter(w => w && w.severity !== 'Header' &&
-            ((w.geometry&&w.geometry.type)||(w.same&&w.same.length>0&&countyBoundaries)));
-         const order = ['tornado warning','severe thunderstorm warning','tornado watch','severe thunderstorm watch'];
-         valid.sort((a,b) => {
-            const at=(a.type||'').toLowerCase(), bt=(b.type||'').toLowerCase();
-            let ai=order.length, bi=order.length;
-            order.forEach((o,i) => { if(at.includes(o)) ai=i; if(bt.includes(o)) bi=i; });
-            return ai!==bi ? ai-bi : new Date(a.time||0)-new Date(b.time||0);
-         });
+          const valid = warningsData.filter(w => w && w.severity !== 'Header' &&
+             ((w.geometry&&w.geometry.type)||(w.same&&w.same.length>0&&countyBoundaries)));
+           const order = ['tornado warning','severe thunderstorm warning','tornado watch','severe thunderstorm watch','flash flood warning','special weather statement'];
+           valid.sort((a,b) => {
+             const at=(a.type||'').toLowerCase(), bt=(b.type||'').toLowerCase();
+             let ai=order.length, bi=order.length;
+             order.forEach((o,i) => { if(at.includes(o)) ai=i; if(bt.includes(o)) bi=i; });
+             return ai!==bi ? ai-bi : new Date(a.expiresTime||0)-new Date(b.expiresTime||0);
+          });
          valid.forEach(warning => {
             const color = getWarningColor(warning.type, warning.severity);
             try {
