@@ -498,15 +498,20 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       }
       .status-time .countdown { color: #fff; font-weight: 600; }
       
-      .main-container {
-         display: flex;
-         height: calc(100vh - 60px);
-      }
+       .main-container {
+          display: flex;
+          height: calc(100vh - 60px);
+       }
+       
+       .mobile-tabs {
+          display: none;
+       }
       
       .map-panel {
          flex: 0 0 60%;
          position: relative;
          border-right: 1px solid #222;
+         display: block;
       }
       #map {
          height: 100%;
@@ -749,7 +754,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          .status-bar h1 { font-size: 16px; }
       }
       
-      @media (max-width: 600px) {
+       @media (max-width: 600px) {
          body { font-size: 14px; }
          .status-bar {
             flex-direction: column;
@@ -773,24 +778,64 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          .status-time {
             font-size: 11px;
          }
+         
+         .mobile-tabs {
+            display: flex;
+            background: #1a1a1a;
+            border-bottom: 1px solid #333;
+         }
+         .mobile-tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+         }
+         .mobile-tab.active {
+            color: #fff;
+            border-bottom: 2px solid #00aa00;
+         }
+         .mobile-tab .tab-count {
+            margin-left: 6px;
+            padding: 2px 6px;
+            background: #333;
+            border-radius: 10px;
+            font-size: 12px;
+         }
+         .mobile-tab.active .tab-count {
+            background: #00aa00;
+            color: #000;
+         }
+         
          .main-container {
             flex-direction: column;
-            height: calc(100vh - 60px);
+            height: calc(100vh - 110px);
          }
-         .map-panel {
-            flex: 0 0 45%;
-            border-right: none;
-            border-bottom: 1px solid #222;
-         }
-         .map-panel #map {
-            touch-action: none;
-         }
-          .warning-panel {
+          .map-panel {
              flex: 1;
-             min-height: 0;
-             overflow-y: auto;
-             -webkit-overflow-scrolling: touch;
+             border-right: none;
+             border-bottom: none;
+             display: none;
           }
+          .map-panel #map {
+             touch-action: none;
+          }
+           .warning-panel {
+              flex: 1;
+              min-height: 0;
+              display: flex;
+              overflow-y: auto;
+              -webkit-overflow-scrolling: touch;
+           }
+          .main-container.show-map .map-panel { display: block; }
+          .main-container.show-map .warning-panel { display: none; }
+          .main-container.show-list .map-panel { display: none; }
+          .main-container.show-list .warning-panel { display: flex; }
           .warning-card {
             padding: 12px;
          }
@@ -1046,19 +1091,41 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          if (watchStatusEl) watchStatusEl.classList.toggle('active', counts.watch > 0);
          if (spsStatusEl) spsStatusEl.classList.toggle('active', counts.sps > 0);
          
-         const mcdCountEl = document.getElementById('mcd-count');
-         const mcdStatusEl = document.getElementById('mcd-status');
-         if (validMCDs) {
-            if (mcdCountEl) mcdCountEl.textContent = validMCDs.length;
-            if (mcdStatusEl) {
-               if (validMCDs.length > 0) {
-                  mcdStatusEl.classList.add('active');
-               } else {
-                  mcdStatusEl.classList.remove('active');
-               }
-            }
-          }
-       }
+          const mcdCountEl = document.getElementById('mcd-count');
+          const mcdStatusEl = document.getElementById('mcd-status');
+          if (validMCDs) {
+             if (mcdCountEl) mcdCountEl.textContent = validMCDs.length;
+             if (mcdStatusEl) {
+                if (validMCDs.length > 0) {
+                   mcdStatusEl.classList.add('active');
+                } else {
+                   mcdStatusEl.classList.remove('active');
+                }
+             }
+           }
+           
+           const totalCount = warningsData.length + (validMCDs ? validMCDs.length : 0);
+           const tabMapCount = document.getElementById('tab-map-count');
+           const tabListCount = document.getElementById('tab-list-count');
+           if (tabMapCount) tabMapCount.textContent = warningsData.length;
+           if (tabListCount) tabListCount.textContent = totalCount;
+        }
+        
+        function switchTab(tab) {
+           const mainContainer = document.querySelector('.main-container');
+           const tabMap = document.getElementById('tab-map');
+           const tabList = document.getElementById('tab-list');
+           if (!mainContainer || !tabMap || !tabList) return;
+           
+           mainContainer.classList.remove('show-map', 'show-list');
+           mainContainer.classList.add('show-' + tab);
+           tabMap.classList.toggle('active', tab === 'map');
+           tabList.classList.toggle('active', tab === 'list');
+           
+           if (tab === 'map' && map) {
+              setTimeout(() => map.invalidateSize(), 100);
+           }
+        }
 
        function addMesoscaleDiscussionsToList() {
          const container = document.getElementById('mcd-cards-container');
@@ -1607,7 +1674,16 @@ radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexr
       </div>
    </div>
 
-   <div class="main-container">
+   <div class="mobile-tabs">
+      <button class="mobile-tab active" id="tab-list" onclick="switchTab('list')">
+         List <span class="tab-count" id="tab-list-count">0</span>
+      </button>
+      <button class="mobile-tab" id="tab-map" onclick="switchTab('map')">
+         Map <span class="tab-count" id="tab-map-count">0</span>
+      </button>
+   </div>
+
+   <div class="main-container show-list">
       <div class="map-panel">
          <div id="map"></div>
       </div>
