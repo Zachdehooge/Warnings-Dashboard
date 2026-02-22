@@ -489,7 +489,14 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          font-family: inherit;
       }
       .leaflet-control-reset-map:hover { background-color: #252525; }
-      
+      .leaflet-container { background: #121212; }
+      .leaflet-control-zoom a { background-color: var(--card-bg) !important; color: var(--text-color) !important; border-color: var(--card-border) !important; }
+      .leaflet-control-zoom a:hover { background-color: #252525 !important; }
+      .leaflet-control-layers { background-color: var(--card-bg); color: var(--text-color); border-color: var(--card-border); }
+      .leaflet-control-layers-toggle { background-color: var(--card-bg); }
+      .leaflet-control-attribution { background-color: rgba(18, 18, 18, 0.8) !important; color: #888 !important; }
+      .leaflet-control-attribution a { color: #aaa !important; }
+
       .warning-panel {
          flex: 0 0 40%;
          display: flex;
@@ -936,6 +943,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             const response = await fetch('https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json');
             countyBoundaries = await response.json();
             console.log('County boundaries loaded successfully');
+            addWarningsToMap();
+            bringSevereToFront();
          } catch (error) {
             console.error('Failed to load county boundaries:', error);
          }
@@ -1231,11 +1240,14 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             subdomains: 'abcd', maxZoom: 20
          }).addTo(map);
 
-         radarLayer = L.tileLayer('https://mesonet.agron.iastate.edu/c/tile.py/1.0.0/ridge::N0Q-0/{z}/{x}/{y}.png', {
-            maxZoom: 16,
-            attribution: 'Radar &copy; IEM'
-         });
-         radarLayer.addTo(map);
+         radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi', {
+             layers: 'nexrad-n0q-m05m',
+             format: 'image/png',
+             transparent: true,
+             opacity: 0.5,
+             maxZoom: 12,
+             attribution: 'Radar data &copy; Iowa Environmental Mesonet'
+         }).addTo(map);
 
          const overlays = { "Radar": radarLayer };
          L.control.layers(null, overlays, { collapsed: false, autoZIndex: false }).addTo(map);
