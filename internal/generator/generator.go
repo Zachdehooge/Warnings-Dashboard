@@ -1236,6 +1236,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                html += '<a href="' + spcUrl + '" target="_blank" class="mcd-card-link" onclick="event.stopPropagation();">View on SPC ↗</a>';
                html += '</div>';
             });
+            
+            const mcdCountEl = document.getElementById('mcd-count');
+            const mcdStatusEl = document.getElementById('mcd-status');
+            if (mcdCountEl) mcdCountEl.textContent = validMCDs.length;
+            if (mcdStatusEl) {
+               mcdStatusEl.classList.add('active');
+            }
          }
          
          if (warnings.length === 0 && (!validMCDs || validMCDs.length === 0)) {
