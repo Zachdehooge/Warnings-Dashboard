@@ -1188,11 +1188,16 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          }, 1000);
          updateCountdown();
 
-         setInterval(function() {
-            refreshTime = 15;
-            updateCountdown();
-            fetchUpdatedWarnings();
-         }, refreshInterval);
+          setInterval(function() {
+             refreshTime = 15;
+             updateCountdown();
+             fetchUpdatedWarnings();
+             if (radarLayer && map.hasLayer(radarLayer)) {
+                radarLayer.bringToBack();
+                map.removeLayer(radarLayer);
+             }
+             radarLayer.addTo(map);
+          }, refreshInterval);
          fetchUpdatedWarnings();
 
          updateAllExpirationCountdowns();
@@ -1249,11 +1254,11 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              maxZoom: 12,
              attribution: 'Radar data &copy; Iowa Environmental Mesonet'
          });
-         setTimeout(function() {
-             radarLayer.addTo(map);
-         }, 1000);
+          setTimeout(function() {
+              radarLayer.addTo(map);
+          }, 1000);
 
-         const overlays = { "Radar": radarLayer };
+          const overlays = { "Radar": radarLayer };
          L.control.layers(null, overlays, { collapsed: false, autoZIndex: false }).addTo(map);
 
          const initialView = [39.8283, -98.5795], initialZoom = 4;
