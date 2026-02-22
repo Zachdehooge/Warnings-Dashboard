@@ -1256,7 +1256,7 @@ radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexr
             layers: 'nexrad-n0q-900913-conus',
             format: 'image/png',
             transparent: true,
-            opacity: 0.5,
+            opacity: 0.6,
             maxZoom: 20,
             attribution: 'Radar data &copy; Iowa Environmental Mesonet'
         });
@@ -1272,8 +1272,9 @@ radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexr
             console.log('[radar] tiles loaded successfully');
         });
 
+        radarLayer.addTo(map);
         const overlays = { "Radar": radarLayer };
-          L.control.layers(null, overlays, { collapsed: false, autoZIndex: false }).addTo(map);
+        L.control.layers(null, overlays, { collapsed: false, autoZIndex: false }).addTo(map);
 
           const initialView = [39.8283, -98.5795], initialZoom = 4;
           L.Control.ResetMap = L.Control.extend({
