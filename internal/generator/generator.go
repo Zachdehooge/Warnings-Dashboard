@@ -443,16 +443,58 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          font-size: 16px;
          font-weight: 600;
       }
-      .status-item.tornado { background: var(--tornado-bg); border: 1px solid var(--tornado-color); color: var(--tornado-color); }
-      .status-item.tstorm { background: var(--tstorm-bg); border: 1px solid var(--tstorm-color); color: var(--tstorm-color); }
-      .status-item.watch { background: var(--watch-bg); border: 1px solid var(--watch-color); color: var(--watch-color); }
+       .status-item.tornado { background: var(--tornado-bg); border: 1px solid var(--tornado-color); color: var(--tornado-color); }
+       .status-item.tstorm { background: var(--tstorm-bg); border: 1px solid var(--tstorm-color); color: var(--tstorm-color); }
+       .status-item.tornado-watch { background: var(--tornado-watch-bg); border: 1px solid var(--tornado-watch-color); color: var(--tornado-watch-color); }
+       .status-item.watch { background: var(--watch-bg); border: 1px solid var(--watch-color); color: var(--watch-color); }
+       .status-item.sps { background: #1a1a2a; border: 1px solid #8866ff; color: #8866ff; }
        .status-item.mcd { background: var(--mcd-bg); border: 1px solid var(--mcd-color); color: var(--mcd-color); }
-      .status-item.sps { background: #1a1a2a; border: 1px solid #8866ff; color: #8866ff; }
-      .status-item.mcd.active { animation: mcdPulse 2s infinite; }
-      @keyframes mcdPulse {
-         0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 255, 0.4); }
-         50% { box-shadow: 0 0 0 8px rgba(0, 255, 255, 0); }
-      }
+       .status-item.tornado.active { animation: tornadoPulse 2s infinite; }
+       .status-item.tstorm.active { animation: tstormPulse 2s infinite; }
+       .status-item.tornado-watch.active { animation: tornadoWatchPulse 2s infinite; }
+       .status-item.watch.active { animation: watchPulse 2s infinite; }
+       .status-item.sps.active { animation: spsPulse 2s infinite; }
+       .status-item.mcd.active { animation: mcdPulse 2s infinite; }
+       @keyframes tornadoPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255, 20, 147, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(255, 20, 147, 0); }
+       }
+       @keyframes tstormPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(255, 0, 0, 0); }
+       }
+       @keyframes tornadoWatchPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 0, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(255, 255, 0, 0); }
+       }
+       @keyframes watchPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255, 165, 0, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(255, 165, 0, 0); }
+       }
+       @keyframes spsPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(136, 102, 255, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(136, 102, 255, 0); }
+       }
+       @keyframes mcdPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 255, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(0, 255, 255, 0); }
+       }
+       @keyframes tstormPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(255, 0, 0, 0); }
+       }
+       @keyframes watchPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255, 165, 0, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(255, 165, 0, 0); }
+       }
+       @keyframes spsPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(136, 102, 255, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(136, 102, 255, 0); }
+       }
+       @keyframes mcdPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 255, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(0, 255, 255, 0); }
+       }
       .status-item .count { font-size: 20px; font-weight: 700; }
       
       .status-time {
@@ -978,24 +1020,38 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       }
 
       function updateWarningTypeCounts() {
-         const counts = { tornado: 0, tstorm: 0, watch: 0, sps: 0 };
+         const counts = { tornado: 0, tstorm: 0, tornadoWatch: 0, watch: 0, sps: 0 };
          warningsData.forEach(w => {
             if (!w.type) return;
             const t = w.type.toLowerCase();
             if (t.includes('tornado warning')) counts.tornado++;
             else if (t.includes('thunderstorm warning')) counts.tstorm++;
+            else if (t.includes('tornado watch')) counts.tornadoWatch++;
             else if (t.includes('watch')) counts.watch++;
             else if (t.includes('special weather statement')) counts.sps++;
          });
          
          const tornadoEl = document.getElementById('count-tornado');
          const tstormEl = document.getElementById('count-tstorm');
+         const tornadoWatchEl = document.getElementById('count-tornado-watch');
          const watchEl = document.getElementById('count-watch');
          const spsEl = document.getElementById('count-sps');
          if (tornadoEl) tornadoEl.textContent = counts.tornado;
          if (tstormEl) tstormEl.textContent = counts.tstorm;
+         if (tornadoWatchEl) tornadoWatchEl.textContent = counts.tornadoWatch;
          if (watchEl) watchEl.textContent = counts.watch;
          if (spsEl) spsEl.textContent = counts.sps;
+         
+         const tornadoStatusEl = document.querySelector('.status-item.tornado');
+         const tstormStatusEl = document.querySelector('.status-item.tstorm');
+         const tornadoWatchStatusEl = document.querySelector('.status-item.tornado-watch');
+         const watchStatusEl = document.querySelector('.status-item.watch');
+         const spsStatusEl = document.querySelector('.status-item.sps');
+         if (tornadoStatusEl) tornadoStatusEl.classList.toggle('active', counts.tornado > 0);
+         if (tstormStatusEl) tstormStatusEl.classList.toggle('active', counts.tstorm > 0);
+         if (tornadoWatchStatusEl) tornadoWatchStatusEl.classList.toggle('active', counts.tornadoWatch > 0);
+         if (watchStatusEl) watchStatusEl.classList.toggle('active', counts.watch > 0);
+         if (spsStatusEl) spsStatusEl.classList.toggle('active', counts.sps > 0);
          
          const mcdCountEl = document.getElementById('mcd-count');
          const mcdStatusEl = document.getElementById('mcd-status');
@@ -1008,10 +1064,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   mcdStatusEl.classList.remove('active');
                }
             }
-         }
-      }
+          }
+       }
 
-      function addMesoscaleDiscussionsToList() {
+       function addMesoscaleDiscussionsToList() {
          const container = document.getElementById('mcd-cards-container');
          const mcdSection = container ? container.closest('.mcd-section') : null;
          if (!container) return;
@@ -1488,25 +1544,30 @@ radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexr
          <div class="status-item tornado">
             <span>🔴</span>
             <span>Tornado</span>
-            <span class="count" id="count-tornado">0</span>
-         </div>
-         <div class="status-item tstorm">
-            <span>⚡</span>
-            <span>T-Storm</span>
-            <span class="count" id="count-tstorm">0</span>
-         </div>
-         <div class="status-item watch">
-            <span>👁</span>
-            <span>Watches</span>
-            <span class="count" id="count-watch">0</span>
-         </div>
-         <div class="status-item sps">
-            <span>📋</span>
-            <span>SWS</span>
-            <span class="count" id="count-sps">0</span>
-         </div>
-         <div class="status-item mcd" id="mcd-status">
-            <span>🗣</span>
+             <span class="count" id="count-tornado">0</span>
+          </div>
+          <div class="status-item tstorm">
+             <span>⚡</span>
+             <span>T-Storm</span>
+             <span class="count" id="count-tstorm">0</span>
+          </div>
+          <div class="status-item tornado-watch">
+             <span>🌪</span>
+             <span>T.Watch</span>
+             <span class="count" id="count-tornado-watch">0</span>
+          </div>
+          <div class="status-item watch">
+             <span>⚡</span>
+             <span>STW</span>
+             <span class="count" id="count-watch">0</span>
+          </div>
+          <div class="status-item sps">
+             <span>📋</span>
+             <span>SWS</span>
+             <span class="count" id="count-sps">0</span>
+          </div>
+          <div class="status-item mcd" id="mcd-status">
+             <span>🗣</span>
 			<span>MCDs</span>
             <span class="count" id="mcd-count">0</span>
          </div>
