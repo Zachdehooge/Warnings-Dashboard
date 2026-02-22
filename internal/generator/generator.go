@@ -792,9 +792,24 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       let warningLayers = [];
       let mesoscaleDiscussions = [];
       let validMCDs = [];
-      let lastUpdateTime = Date.now();
+       let lastUpdateTime = Date.now();
 
-      async function fetchUpdatedWarnings() {
+       function clearRadarLayer() {
+           if (radarLayer && map.hasLayer(radarLayer)) {
+              map.removeLayer(radarLayer);
+           }
+        }
+
+        function addRadarLayer() {
+           if (radarLayer) {
+              if (!map.hasLayer(radarLayer)) {
+                 radarLayer.addTo(map);
+              }
+              radarLayer.bringToBack();
+           }
+        }
+
+       async function fetchUpdatedWarnings() {
          try {
             const response = await fetch('warnings.json?_=' + Date.now());
             if (!response.ok) throw new Error('Failed to read warnings.json: ' + response.status);
@@ -827,10 +842,6 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             addMesoscaleDiscussionsToMap();
             addWarningsToMap();
             bringSevereToFront();
-            if (radarLayer && map.hasLayer(radarLayer)) {
-               radarLayer.bringToBack();
-               radarLayer.redraw();
-            }
             addMesoscaleDiscussionsToList();
             updateListView(warningsData);
             console.log('[poll] map and list updated with ' + warningsData.length + ' warnings');
@@ -1188,19 +1199,14 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          }, 1000);
          updateCountdown();
 
-          setInterval(function() {
-             refreshTime = 15;
-             updateCountdown();
-             fetchUpdatedWarnings();
-             if (radarLayer && map.hasLayer(radarLayer)) {
-                radarLayer.bringToBack();
-                map.removeLayer(radarLayer);
-             }
-             radarLayer.addTo(map);
-          }, refreshInterval);
-         fetchUpdatedWarnings();
+setInterval(function() {
+              refreshTime = 15;
+              updateCountdown();
+              fetchUpdatedWarnings();
+}, refreshInterval);
+           fetchUpdatedWarnings();
 
-         updateAllExpirationCountdowns();
+          updateAllExpirationCountdowns();
 
          setInterval(function() {
             const now = Date.now();
@@ -1246,44 +1252,52 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             subdomains: 'abcd', maxZoom: 20
          }).addTo(map);
 
-         radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi', {
-             layers: 'nexrad-n0q-900913-conus',
-             format: 'image/png',
-             transparent: true,
-             opacity: 0.5,
-             maxZoom: 12,
-             attribution: 'Radar data &copy; Iowa Environmental Mesonet'
-         });
-          setTimeout(function() {
-              radarLayer.addTo(map);
-          }, 1000);
+radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi', {
+            layers: 'nexrad-n0q-900913-conus',
+            format: 'image/png',
+            transparent: true,
+            opacity: 0.5,
+            maxZoom: 20,
+            attribution: 'Radar data &copy; Iowa Environmental Mesonet'
+        });
+        radarLayer.on('tileerror', function(e) {
+            console.error('[radar] tile error:', e);
+            setTimeout(function() { 
+                if (typeof radarLayer.redraw === 'function') {
+                    radarLayer.redraw();
+                }
+            }, 2000);
+        });
+        radarLayer.on('load', function() {
+            console.log('[radar] tiles loaded successfully');
+        });
 
-          const overlays = { "Radar": radarLayer };
-         L.control.layers(null, overlays, { collapsed: false, autoZIndex: false }).addTo(map);
+        const overlays = { "Radar": radarLayer };
+          L.control.layers(null, overlays, { collapsed: false, autoZIndex: false }).addTo(map);
 
-         const initialView = [39.8283, -98.5795], initialZoom = 4;
-         L.Control.ResetMap = L.Control.extend({
-            onAdd: function(map) {
-               const btn = L.DomUtil.create('button', 'leaflet-control-reset-map');
-               btn.innerHTML = '⟲ Reset';
-               btn.title = 'Reset to full US view';
-               btn.onclick = function(e) {
-                  L.DomEvent.stopPropagation(e);
-                  map.setView(initialView, initialZoom);
-                  localStorage.removeItem('mapState');
-               };
-               return btn;
-            }
-         });
-         L.control.resetMap = opts => new L.Control.ResetMap(opts);
-         L.control.resetMap({ position: 'topright' }).addTo(map);
-         map.on('moveend', saveMapState);
-         map.on('zoomend', saveMapState);
+          const initialView = [39.8283, -98.5795], initialZoom = 4;
+          L.Control.ResetMap = L.Control.extend({
+             onAdd: function(map) {
+                const btn = L.DomUtil.create('button', 'leaflet-control-reset-map');
+                btn.innerHTML = '⟲ Reset';
+                btn.title = 'Reset to full US view';
+                btn.onclick = function(e) {
+                   L.DomEvent.stopPropagation(e);
+                   map.setView(initialView, initialZoom);
+                   localStorage.removeItem('mapState');
+                };
+                return btn;
+             }
+          });
+          L.control.resetMap = opts => new L.Control.ResetMap(opts);
+          L.control.resetMap({ position: 'topright' }).addTo(map);
+          map.on('moveend', saveMapState);
+          map.on('zoomend', saveMapState);
 
-         addWarningsToMap();
-         updateListView(warningsData);
+          addWarningsToMap();
+          updateListView(warningsData);
 
-         loadCountyBoundaries();
+          loadCountyBoundaries();
       }
 
       function saveMapState() {
@@ -1459,12 +1473,12 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       <h1>US Weather Warnings</h1>
       <div class="status-summary">
          <div class="status-item tornado">
-            <span>⚡</span>
+            <span>🔴</span>
             <span>Tornado</span>
             <span class="count" id="count-tornado">0</span>
          </div>
          <div class="status-item tstorm">
-            <span>🔴</span>
+            <span>⚡</span>
             <span>T-Storm</span>
             <span class="count" id="count-tstorm">0</span>
          </div>
@@ -1475,11 +1489,12 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          </div>
          <div class="status-item sps">
             <span>📋</span>
-            <span>SPS</span>
+            <span>SWS</span>
             <span class="count" id="count-sps">0</span>
          </div>
          <div class="status-item mcd" id="mcd-status">
-            <span>MCDs</span>
+            <span>🗣</span>
+			<span>MCDs</span>
             <span class="count" id="mcd-count">0</span>
          </div>
       </div>
