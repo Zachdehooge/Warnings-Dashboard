@@ -545,12 +545,17 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          -webkit-overflow-scrolling: touch;
       }
       
-      .mcd-section {
-         flex-shrink: 0;
-         padding: 15px;
-         background: var(--mcd-bg);
-         border-bottom: 1px solid var(--mcd-color);
-      }
+       .mcd-section {
+          flex-shrink: 0;
+          padding: 15px;
+          background: var(--mcd-bg);
+          border-bottom: 1px solid var(--mcd-color);
+       }
+       @media (max-width: 600px) {
+          .mcd-section {
+             display: none;
+          }
+       }
       .mcd-section h3 {
          font-size: 14px;
          text-transform: uppercase;
@@ -558,13 +563,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          color: var(--mcd-color);
          margin-bottom: 10px;
       }
-      .mcd-cards {
-         display: flex;
-         gap: 12px;
-         overflow-x: auto;
-         padding-bottom: 5px;
-      }
-      .mcd-cards::-webkit-scrollbar { height: 6px; }
+       .mcd-cards {
+          display: flex;
+          gap: 12px;
+          overflow-x: auto;
+          padding-bottom: 5px;
+       }
+       .mcd-cards::-webkit-scrollbar { height: 6px; }
       .mcd-cards::-webkit-scrollbar-track { background: #0a1a1a; }
       .mcd-cards::-webkit-scrollbar-thumb { background: var(--mcd-color); border-radius: 3px; }
       .mcd-card {
@@ -780,26 +785,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          .map-panel #map {
             touch-action: none;
          }
-         .warning-panel {
-            flex: 1;
-            min-height: 0;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-         }
-         .mcd-section {
-            padding: 10px;
-         }
-         .mcd-section h3 {
-            font-size: 12px;
-         }
-         .mcd-card {
-            min-width: 220px;
-            padding: 10px;
-         }
-         .mcd-card-header .mcd-num {
-            font-size: 14px;
-         }
-         .warning-card {
+          .warning-panel {
+             flex: 1;
+             min-height: 0;
+             overflow-y: auto;
+             -webkit-overflow-scrolling: touch;
+          }
+          .warning-card {
             padding: 12px;
          }
          .warning-card h3 {
@@ -815,10 +807,17 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          .warning-card .countdown {
             font-size: 16px;
          }
-         .warning-type-header h2 {
-            font-size: 12px;
-         }
-      }
+          .warning-type-header h2 {
+             font-size: 12px;
+          }
+          .warning-type-header.mcd { background: var(--mcd-bg); border: 2px solid var(--mcd-color); border-bottom: none; }
+          .warning-type-header.mcd h2 { color: var(--mcd-color); }
+          .warning-card.mcd { background: var(--mcd-bg); border-color: var(--mcd-color); }
+          .warning-card-header.mcd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+          .warning-card-header.mcd h3 { color: var(--mcd-color); font-size: 16px; font-weight: 600; flex: 1; margin-right: 10px; cursor: pointer; }
+          .warning-card-header.mcd h3:hover { text-decoration: underline; }
+          .severity-badge.mcd { background: #FFA500; color: #000; font-size: 11px; font-weight: 600; padding: 3px 6px; border-radius: 4px; }
+       }
     </style>
    <script>
       let map;
@@ -1066,6 +1065,9 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          const mcdSection = container ? container.closest('.mcd-section') : null;
          if (!container) return;
 
+         const isMobile = window.innerWidth <= 600;
+         if (isMobile) return;
+
          validMCDs = mesoscaleDiscussions.filter(mcd => extractMCDNumber(mcd.properties || {}) !== '????');
 
          const mcdCountEl = document.getElementById('mcd-count');
@@ -1214,10 +1216,34 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          const listSection = document.getElementById('warnings-list');
          if (!listSection) return;
          
-         if (warnings.length === 0) {
+         let html = '';
+         const isMobile = window.innerWidth <= 600;
+         
+         if (isMobile && validMCDs && validMCDs.length > 0) {
+            html += '<div class="warning-type-header mcd" id="mcd-header"><h2>Mesoscale Discussions (' + validMCDs.length + ')</h2></div>';
+            validMCDs.forEach((mcd, index) => {
+               const props = mcd.properties || {};
+               const mcdNum = extractMCDNumber(props);
+               const parsed = parseMCDText(props._fullText || '');
+               const spcUrl = mcdSPCLink(mcdNum);
+               html += '<div class="warning-card mcd" onclick="zoomToMCD(' + index + ')">';
+               html += '<div class="warning-card-header mcd">';
+               html += '<h3>MCD #' + mcdNum + '</h3>';
+               if (parsed.probability) html += '<span class="severity-badge mcd">' + escapeHtml(parsed.probability) + '</span>';
+               html += '</div>';
+               if (parsed.area) html += '<div class="area">' + escapeHtml(parsed.area.substring(0, 80)) + (parsed.area.length > 80 ? '...' : '') + '</div>';
+               if (parsed.concerning) html += '<div class="mcd-card-concerning">' + escapeHtml(parsed.concerning) + '</div>';
+               html += '<a href="' + spcUrl + '" target="_blank" class="mcd-card-link" onclick="event.stopPropagation();">View on SPC ↗</a>';
+               html += '</div>';
+            });
+         }
+         
+         if (warnings.length === 0 && (!validMCDs || validMCDs.length === 0)) {
             listSection.innerHTML = '<div class="no-warnings">No active weather warnings</div>';
+         } else if (warnings.length === 0) {
+            listSection.innerHTML = html;
          } else {
-            listSection.innerHTML = renderWarningsList(warnings);
+            listSection.innerHTML = html + renderWarningsList(warnings);
          }
          updateAllExpirationCountdowns();
       }
@@ -1580,7 +1606,7 @@ radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexr
       </div>
 
       <div class="warning-panel">
-         <div class="mcd-section">
+         <div class="mcd-section" id="mcd-static-section">
             <h3>Mesoscale Discussions</h3>
             <div class="mcd-cards" id="mcd-cards-container">
                <div style="color:#444;font-size:14px;">Loading MCDs...</div>
