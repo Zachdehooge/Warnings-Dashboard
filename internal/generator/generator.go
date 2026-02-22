@@ -1067,6 +1067,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       function zoomToMCD(index) {
          const mcd = validMCDs[index];
          if (!mcd || !mcd.geometry) return;
+         const mcdNum = extractMCDNumber(mcd.properties || {});
          try {
             let bounds;
             if (mcd.geometry.type === 'Polygon') {
@@ -1074,7 +1075,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             } else if (mcd.geometry.type === 'MultiPolygon') {
                bounds = L.latLngBounds(mcd.geometry.coordinates.flat(1).map(c => [c[1],c[0]]));
             }
-            if (bounds && bounds.isValid()) map.fitBounds(bounds, { padding:[50,50] });
+            if (bounds && bounds.isValid()) {
+               map.fitBounds(bounds, { padding:[50,50] });
+               setTimeout(() => {
+                  const layer = warningLayers.find(l => l._popup && l._popup._content && l._popup._content.includes('MCD #' + mcdNum));
+                  if (layer) layer.openPopup();
+               }, 500);
+            }
          } catch (e) { console.error('Error zooming to MCD:', e); }
       }
 
@@ -1323,9 +1330,13 @@ radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexr
                const expire = extractExpireTime(parsed.valid);
 
                const geoJsonLayer = L.geoJSON(mcd, {
-                  style: { color:'#00FFFF', fillColor:'#00FFFF', fillOpacity:0.15, weight:2, opacity:0.9, dashArray:'10, 5' }
-               }).addTo(map);
-               warningLayers.push(geoJsonLayer);
+                   style: { color:'#00FFFF', fillColor:'#00FFFF', fillOpacity:0.15, weight:2, opacity:0.9, dashArray:'10, 5' }
+                }).addTo(map);
+                geoJsonLayer.on('click', function(e) {
+                   L.DomEvent.stopPropagation(e);
+                   geoJsonLayer.openPopup();
+                });
+                warningLayers.push(geoJsonLayer);
 
                let bodyHtml = '';
                if (parsed.area||parsed.concerning||parsed.summary||parsed.discussion||parsed.probability) {
