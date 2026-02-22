@@ -537,6 +537,9 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   addMesoscaleDiscussionsToMap();
                   addWarningsToMap();
                   bringSevereToFront();
+                  if (radarLayer && map.hasLayer(radarLayer)) {
+                      radarLayer.bringToBack();
+                  }
                   addMesoscaleDiscussionsToList();
                   updateListView(warningsData);
                   console.log('[poll] map and list updated with ' + warningsData.length + ' warnings');
@@ -957,6 +960,22 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
                   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                   subdomains: 'abcd', maxZoom: 20
               }).addTo(map);
+
+              // Add radar reflectivity layer (Iowa Environmental Mesonet)
+              const radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi', {
+                  layers: 'nexrad-n0q-m05m',
+                  format: 'image/png',
+                  transparent: true,
+                  opacity: 0.5,
+                  maxZoom: 12,
+                  attribution: 'Radar data &copy; Iowa Environmental Mesonet'
+              });
+
+               // Layer control for toggling radar only
+               const overlays = {
+                   "Radar": radarLayer
+               };
+               L.control.layers(null, overlays, { collapsed: false, autoZIndex: false }).addTo(map);
 
               const initialView = [39.8283, -98.5795], initialZoom = 4;
               L.Control.ResetMap = L.Control.extend({
