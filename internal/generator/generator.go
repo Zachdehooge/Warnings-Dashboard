@@ -1258,29 +1258,37 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       }
 
       function zoomToMCD(index) {
-         const isMobile = window.innerWidth <= 600;
-         if (isMobile) {
-            switchTab('map');
-         }
-         
-         const mcd = validMCDs[index];
-         if (!mcd || !mcd.geometry) return;
-         const mcdNum = extractMCDNumber(mcd.properties || {});
-         try {
-            let bounds;
-            if (mcd.geometry.type === 'Polygon') {
-               bounds = L.latLngBounds(mcd.geometry.coordinates[0].map(c => [c[1],c[0]]));
-            } else if (mcd.geometry.type === 'MultiPolygon') {
-               bounds = L.latLngBounds(mcd.geometry.coordinates.flat(1).map(c => [c[1],c[0]]));
-            }
-            if (bounds && bounds.isValid()) {
-               map.fitBounds(bounds, { padding:[50,50] });
-               setTimeout(() => {
-                  const layer = warningLayers.find(l => l._popup && l._popup._content && l._popup._content.includes('MCD #' + mcdNum));
-                  if (layer) layer.openPopup();
-               }, isMobile ? 600 : 500);
-            }
-         } catch (e) { console.error('Error zooming to MCD:', e); }
+          const isMobile = window.innerWidth <= 600;
+          if (isMobile) {
+             switchTab('map');
+             map.invalidateSize();
+          }
+          
+          const mcd = validMCDs[index];
+          if (!mcd || !mcd.geometry) return;
+          const mcdNum = extractMCDNumber(mcd.properties || {});
+          const doZoom = () => {
+             try {
+                let bounds;
+                if (mcd.geometry.type === 'Polygon') {
+                   bounds = L.latLngBounds(mcd.geometry.coordinates[0].map(c => [c[1],c[0]]));
+                } else if (mcd.geometry.type === 'MultiPolygon') {
+                   bounds = L.latLngBounds(mcd.geometry.coordinates.flat(1).map(c => [c[1],c[0]]));
+                }
+                if (bounds && bounds.isValid()) {
+                   map.fitBounds(bounds, { padding:[50,50] });
+                   setTimeout(() => {
+                      const layer = warningLayers.find(l => l._popup && l._popup._content && l._popup._content.includes('MCD #' + mcdNum));
+                      if (layer) layer.openPopup();
+                   }, isMobile ? 600 : 500);
+                }
+             } catch (e) { console.error('Error zooming to MCD:', e); }
+          };
+          if (isMobile) {
+             setTimeout(doZoom, 150);
+          } else {
+             doZoom();
+          }
       }
 
       function getSeverityClassJS(severity) {
@@ -1475,26 +1483,34 @@ setInterval(function() {
       };
 
       function zoomToWarning(warningId) {
-         const isMobile = window.innerWidth <= 600;
-         if (isMobile) {
-            switchTab('map');
-         }
-         
-         const warning = warningsData.find(w => w.id === warningId);
-         if (!warning) return;
-         const layer = warningLayers.find(l => l._popup && l._popup._content &&
-            l._popup._content.includes(warning.type) && l._popup._content.includes(warning.area));
-         if (layer && layer.getBounds) {
-            map.fitBounds(layer.getBounds(), { padding:[50,50] });
-            setTimeout(() => layer.openPopup(), isMobile ? 600 : 500);
-         } else if (warning.geometry && warning.geometry.coordinates) {
-            try {
-               const coords = warning.geometry.type === 'Polygon'
-                  ? warning.geometry.coordinates[0]
-                  : warning.geometry.coordinates[0][0];
-               map.fitBounds(L.latLngBounds(coords.map(c => [c[1],c[0]])), { padding:[50,50] });
-            } catch(e) { console.error('Error zooming to warning:', e); }
-         }
+          const isMobile = window.innerWidth <= 600;
+          if (isMobile) {
+             switchTab('map');
+             map.invalidateSize();
+          }
+          
+          const warning = warningsData.find(w => w.id === warningId);
+          if (!warning) return;
+          const layer = warningLayers.find(l => l._popup && l._popup._content &&
+             l._popup._content.includes(warning.type) && l._popup._content.includes(warning.area));
+          const doZoom = () => {
+             if (layer && layer.getBounds) {
+                map.fitBounds(layer.getBounds(), { padding:[50,50] });
+                setTimeout(() => layer.openPopup(), isMobile ? 600 : 500);
+             } else if (warning.geometry && warning.geometry.coordinates) {
+                try {
+                   const coords = warning.geometry.type === 'Polygon'
+                      ? warning.geometry.coordinates[0]
+                      : warning.geometry.coordinates[0][0];
+                   map.fitBounds(L.latLngBounds(coords.map(c => [c[1],c[0]])), { padding:[50,50] });
+                } catch(e) { console.error('Error zooming to warning:', e); }
+             }
+          };
+          if (isMobile) {
+             setTimeout(doZoom, 150);
+          } else {
+             doZoom();
+          }
       }
 
       async function initMap() {
