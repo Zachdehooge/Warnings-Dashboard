@@ -829,6 +829,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             bringSevereToFront();
             if (radarLayer && map.hasLayer(radarLayer)) {
                radarLayer.bringToBack();
+               radarLayer.redraw();
             }
             addMesoscaleDiscussionsToList();
             updateListView(warningsData);
@@ -1232,12 +1233,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       }
 
       async function initMap() {
+         localStorage.removeItem('mapState');
          map = L.map('map', { zoomControl: true }).setView([39.8283, -98.5795], 4);
-
-         const savedMapState = localStorage.getItem('mapState');
-         if (savedMapState) {
-            try { const s = JSON.parse(savedMapState); map.setView([s.lat, s.lng], s.zoom); } catch(e) {}
-         }
 
          L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; OpenStreetMap &copy; CARTO',
@@ -1245,13 +1242,16 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          }).addTo(map);
 
          radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi', {
-             layers: 'nexrad-n0q-m05m',
+             layers: 'nexrad-n0q-900913-conus',
              format: 'image/png',
              transparent: true,
              opacity: 0.5,
              maxZoom: 12,
              attribution: 'Radar data &copy; Iowa Environmental Mesonet'
-         }).addTo(map);
+         });
+         setTimeout(function() {
+             radarLayer.addTo(map);
+         }, 1000);
 
          const overlays = { "Radar": radarLayer };
          L.control.layers(null, overlays, { collapsed: false, autoZIndex: false }).addTo(map);
