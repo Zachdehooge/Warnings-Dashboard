@@ -405,37 +405,51 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          --countdown-warning: #FFAA00;
          --countdown-ok: #00FF00;
       }
-      body {
-         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-         background-color: var(--bg-color);
-         color: var(--text-color);
-         font-size: 18px;
-         line-height: 1.4;
-      }
+       body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+          background-color: var(--bg-color);
+          color: var(--text-color);
+          font-size: 18px;
+          line-height: 1.4;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          height: 100vh;
+       }
       
-      .status-bar {
-         display: flex;
-         align-items: center;
-         justify-content: space-between;
-         padding: 12px 20px;
-         background: var(--status-bg);
-         border-bottom: 1px solid #222;
-         flex-shrink: 0;
-      }
-      .status-bar h1 {
-         font-size: 22px;
-         font-weight: 600;
-         color: #fff;
-         text-transform: uppercase;
-         letter-spacing: 2px;
-      }
+        .status-bar {
+           display: flex;
+           flex-direction: column;
+           padding: 12px 20px;
+           background: var(--status-bg);
+           border-bottom: 1px solid #222;
+           flex-shrink: 0;
+           position: relative;
+        }
+       .status-header {
+           display: flex;
+           align-items: center;
+           justify-content: space-between;
+           flex-shrink: 0;
+        }
+       .status-bar h1 {
+          font-size: 22px;
+          font-weight: 600;
+          color: #fff;
+          text-transform: uppercase;
+          letter-spacing: 2px;
+          line-height: 1.2;
+       }
        .status-summary {
            display: flex;
            gap: 20px;
            align-items: center;
+           flex-wrap: wrap;
            flex-shrink: 0;
+           justify-content: space-between;
+           margin-top: 8px;
         }
-        .status-item {
+       .status-item {
            display: flex;
            align-items: center;
            gap: 8px;
@@ -491,20 +505,20 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        }
        .status-item .count { font-size: 20px; font-weight: 700; }
       
-      .status-time {
-          display: flex;
-          align-items: center;
-          gap: 15px;
-          font-size: 14px;
-          color: var(--text-muted);
-          flex-shrink: 0;
-       }
-      .status-time .countdown { color: #fff; font-weight: 600; }
+       .status-time {
+           display: flex;
+           gap: 15px;
+           font-size: 14px;
+           color: var(--text-muted);
+           flex-shrink: 0;
+        }
+       .status-time .countdown { color: #fff; font-weight: 600; }
       
-       .main-container {
-          display: flex;
-          height: calc(100vh - 60px);
-       }
+        .main-container {
+           display: flex;
+           flex: 1;
+           min-height: 0;
+        }
        
        .mobile-tabs {
           display: none;
@@ -768,15 +782,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          color: #444;
          font-size: 20px;
       }
-      
-      body.header-wrapped .main-container { flex-direction: column; height: calc(100vh - 70px); margin-top: 70px; }
+       
+      body.header-wrapped .main-container { flex-direction: column; }
       body.header-wrapped .map-panel { flex: 0 0 45%; border-right: none; border-bottom: 1px solid #222; }
       body.header-wrapped .warning-panel { flex: 1; min-height: 0; overflow-y: auto; }
-      body.header-wrapped .status-bar { flex-wrap: wrap; gap: 10px; justify-content: flex-start; }
-      body.header-wrapped .status-bar h1 { font-size: 16px; flex-shrink: 1; min-width: 0; }
-      body.header-wrapped .status-summary { display: flex; flex-wrap: wrap; flex-shrink: 1; }
-      body.header-wrapped .status-summary > * { flex-shrink: 1; }
-      body.header-wrapped .status-summary, body.header-wrapped .status-item, body.header-wrapped .status-time { flex-shrink: 1; }
       body.header-wrapped .warnings-section { padding-top: 25px; }
       body.header-wrapped .warning-card:first-of-type { margin-top: 20px; }
 
@@ -784,32 +793,31 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       body:not(.header-wrapped) .map-panel { flex: 3 1 0%; border-right: 1px solid #222; }
       body:not(.header-wrapped) .warning-panel { flex: 2 1 0%; }
 
-      @media (min-width: 1701px) {
-         .status-bar {
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: flex-start;
-            overflow: visible;
-            min-height: 60px;
-         }
-         .status-bar > * {
-            flex-shrink: 1;
-         }
-         .status-bar h1 {
-            flex-shrink: 1;
-            min-width: 0;
-         }
-         .status-summary {
-            display: flex;
-            flex-wrap: wrap;
-            flex-shrink: 1;
-         }
-         .status-summary > * {
-            flex-shrink: 1;
-         }
-         .status-summary, .status-item, .status-time {
-            flex-shrink: 1;
-         }
+       @media (min-width: 1701px) {
+          .status-bar {
+             flex-wrap: wrap;
+             gap: 10px;
+             justify-content: flex-start;
+             overflow: visible;
+          }
+          .status-bar > * {
+             flex-shrink: 1;
+          }
+          .status-bar h1 {
+             flex-shrink: 1;
+             min-width: 0;
+          }
+          .status-summary {
+             display: flex;
+             flex-wrap: wrap;
+             flex-shrink: 1;
+          }
+          .status-summary > * {
+             flex-shrink: 1;
+          }
+          .status-summary, .status-item, .status-time {
+             flex-shrink: 1;
+          }
          .map-panel {
             overflow: hidden;
             z-index: 1;
@@ -820,23 +828,8 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          .map-panel #map {
             overflow: hidden;
          }
-         .leaflet-top, .leaflet-bottom {
-            z-index: 1001 !important;
-         }
-         .status-bar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 1000;
-         }
-           .main-container {
-              margin-top: 70px;
-              height: calc(100vh - 70px);
-           }
-          .main-container {
-             z-index: 1;
-             position: relative;
+       .leaflet-top, .leaflet-bottom {
+             z-index: 1001 !important;
           }
        }
        
@@ -853,16 +846,22 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             height: 100%;
          }
          .status-bar {
-            flex-direction: column;
-            gap: 8px;
-            padding: 10px;
-            position: relative;
-            z-index: 1001;
-         }
-         .status-bar h1 { 
-            font-size: 14px; 
-            letter-spacing: 1px;
-         }
+             flex-direction: column;
+             gap: 8px;
+              padding: 10px;
+              position: relative;
+              z-index: 1001;
+           }
+           .status-header {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              gap: 4px;
+           }
+           .status-bar h1 {
+             font-size: 14px; 
+             letter-spacing: 1px;
+          }
          .status-summary {
             flex-wrap: wrap;
             justify-content: center;
@@ -1497,24 +1496,41 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
 
 
       function updateHeaderWrapState() {
-         const statusBar = document.querySelector('.status-bar');
          const statusSummary = document.querySelector('.status-summary');
-         if (!statusBar || !statusSummary) return;
+         if (!statusSummary) return;
+         
          const isMobile = window.innerWidth <= 600;
          if (isMobile) {
             document.body.classList.remove('header-wrapped');
             return;
          }
-         const statusBarHeight = statusBar.offsetHeight;
-         const statusBarLine = statusBar.offsetTop + statusBarHeight;
-         const summaryLine = statusSummary.offsetTop + statusSummary.offsetHeight;
-         const isWrapped = summaryLine > statusBarLine + 5;
-         document.body.classList.toggle('header-wrapped', isWrapped);
+         
+         const items = statusSummary.querySelectorAll('.status-item');
+         if (items.length < 2) return;
+         
+         const firstItem = items[0];
+         const firstItemRect = firstItem.getBoundingClientRect();
+         
+         let hasWrapped = false;
+         for (let i = 1; i < items.length; i++) {
+            const itemRect = items[i].getBoundingClientRect();
+            if (itemRect.top > firstItemRect.top + 2) {
+               hasWrapped = true;
+               break;
+            }
+         }
+         
+         document.body.classList.toggle('header-wrapped', hasWrapped);
       }
+
+      let resizeTimer;
+      window.addEventListener('resize', function() {
+         clearTimeout(resizeTimer);
+         resizeTimer = setTimeout(updateHeaderWrapState, 100);
+      });
 
       window.onload = function() {
          updateHeaderWrapState();
-         window.addEventListener('resize', updateHeaderWrapState);
          initMap();
 
          const initialTimestamp = {{ .UpdatedAtUTC }};
@@ -1835,7 +1851,13 @@ radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexr
 </head>
 <body>
    <div class="status-bar">
-      <h1>US Weather Warnings</h1>
+      <div class="status-header">
+         <h1>US Weather Warnings</h1>
+         <div class="status-time">
+            <span>Updated: <span id="last-updated-time">{{ .LastUpdated }}</span></span>
+            <span>Refresh: <span class="countdown">15s</span></span>
+         </div>
+      </div>
       <div class="status-summary">
          <div class="status-item tornado">
             <span>🌪️</span>
@@ -1864,13 +1886,9 @@ radarLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/nexr
           </div>
           <div class="status-item mcd" id="mcd-status">
              <span>🗣</span>
-			<span>MCDs</span>
+ 			<span>MCDs</span>
             <span class="count" id="mcd-count">0</span>
          </div>
-      </div>
-      <div class="status-time">
-         <span>Updated: <span id="last-updated-time">{{ .LastUpdated }}</span></span>
-         <span>Refresh: <span class="countdown">15s</span></span>
       </div>
    </div>
 
