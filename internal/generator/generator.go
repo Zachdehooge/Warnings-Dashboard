@@ -773,8 +773,11 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          .main-container { flex-direction: column; height: calc(100vh - 60px); }
          .map-panel { flex: 0 0 45%; border-right: none; border-bottom: 1px solid #222; }
          .warning-panel { flex: 1; min-height: 0; overflow-y: auto; }
-         .status-bar { flex-wrap: wrap; gap: 10px; }
-         .status-bar h1 { font-size: 16px; }
+         .status-bar { flex-wrap: wrap; gap: 10px; justify-content: flex-start; }
+         .status-bar h1 { font-size: 16px; flex-shrink: 1; min-width: 0; }
+         .status-summary { display: flex; flex-wrap: wrap; flex-shrink: 1; }
+         .status-summary > * { flex-shrink: 1; }
+         .status-summary, .status-item, .status-time { flex-shrink: 1; }
       }
       
       @media (min-width: 1025px) {
