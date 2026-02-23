@@ -429,22 +429,22 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          text-transform: uppercase;
          letter-spacing: 2px;
       }
-      .status-summary {
-          display: flex;
-          gap: 20px;
-          align-items: center;
-          flex-shrink: 0;
-       }
-       .status-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 6px 14px;
-          border-radius: 6px;
-          font-size: 16px;
-          font-weight: 600;
-          flex-shrink: 0;
-       }
+       .status-summary {
+           display: flex;
+           gap: 20px;
+           align-items: center;
+           flex-shrink: 0;
+        }
+        .status-item {
+           display: flex;
+           align-items: center;
+           gap: 8px;
+           padding: 6px 14px;
+           border-radius: 6px;
+           font-size: 16px;
+           font-weight: 600;
+           flex-shrink: 0;
+        }
        .status-item.tornado { background: var(--tornado-bg); border: 1px solid var(--tornado-color); color: var(--tornado-color); }
        .status-item.tstorm { background: var(--tstorm-bg); border: 1px solid var(--tstorm-color); color: var(--tstorm-color); }
        .status-item.tornado-watch { background: var(--tornado-watch-bg); border: 1px solid var(--tornado-watch-color); color: var(--tornado-watch-color); }
@@ -511,16 +511,34 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
        }
       
       .map-panel {
-          flex: 0 0 60%;
+          flex: 3 1 0%;
           position: relative;
           border-right: 1px solid #222;
           display: block;
           overflow: hidden;
+          min-width: 0;
        }
-      #map {
-         height: 100%;
-         width: 100%;
-      }
+       #map {
+          height: 100%;
+          width: 100%;
+       }
+       .leaflet-control-container {
+          position: absolute;
+          width: 100%;
+          height: 100%;
+          pointer-events: none;
+       }
+       .leaflet-control-container .leaflet-control {
+          pointer-events: auto;
+       }
+       .leaflet-top, .leaflet-bottom {
+          position: absolute;
+          z-index: 800;
+          pointer-events: none;
+       }
+       .leaflet-top .leaflet-control, .leaflet-bottom .leaflet-control {
+          pointer-events: auto;
+       }
       .leaflet-control-reset-map {
          background-color: var(--card-bg);
          color: var(--text-color);
@@ -544,15 +562,16 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       .leaflet-popup-content a { color: #00aaaa !important; }
       .leaflet-popup-close-button { color: var(--text-color) !important; }
 
-      .warning-panel {
-         flex: 0 0 40%;
-         display: flex;
-         flex-direction: column;
-         background: var(--panel-bg);
-         overflow-y: auto;
-         overflow-x: hidden;
-         -webkit-overflow-scrolling: touch;
-      }
+       .warning-panel {
+          flex: 2 1 0%;
+          display: flex;
+          flex-direction: column;
+          background: var(--panel-bg);
+          overflow-y: auto;
+          overflow-x: hidden;
+          -webkit-overflow-scrolling: touch;
+          min-width: 0;
+       }
       
        .mcd-section {
           flex-shrink: 0;
@@ -759,11 +778,26 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
       }
       
       @media (min-width: 1025px) {
+         .status-bar {
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: flex-start;
+         }
+         .status-bar h1 {
+            flex-shrink: 1;
+         }
+         .status-summary {
+            flex-wrap: wrap;
+            flex-shrink: 1;
+         }
          .status-summary, .status-item, .status-time {
-            flex-shrink: 0;
+            flex-shrink: 1;
          }
          .map-panel {
-            overflow: hidden;
+            overflow: visible;
+         }
+         .map-panel #map {
+            overflow: visible;
          }
          .status-bar {
             position: fixed;
@@ -897,7 +931,13 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
           .main-container.show-list .map-panel { display: none; }
           .main-container.show-list .warning-panel { display: flex; flex: 1; }
           
-          .leaflet-control-reset-map {
+          .leaflet-top {
+          top: 10px;
+       }
+       .leaflet-bottom {
+          bottom: 10px;
+       }
+       .leaflet-control-reset-map {
              display: none;
           }
           
