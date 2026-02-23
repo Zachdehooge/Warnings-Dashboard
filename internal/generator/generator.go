@@ -782,22 +782,39 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             flex-wrap: wrap;
             gap: 10px;
             justify-content: flex-start;
+            overflow: visible;
+            min-height: 60px;
+         }
+         .status-bar > * {
+            flex-shrink: 1;
          }
          .status-bar h1 {
             flex-shrink: 1;
+            min-width: 0;
          }
          .status-summary {
+            display: flex;
             flex-wrap: wrap;
+            flex-shrink: 1;
+         }
+         .status-summary > * {
             flex-shrink: 1;
          }
          .status-summary, .status-item, .status-time {
             flex-shrink: 1;
          }
          .map-panel {
-            overflow: visible;
+            overflow: hidden;
+            z-index: 1;
+         }
+         .warning-panel {
+            z-index: 2;
          }
          .map-panel #map {
-            overflow: visible;
+            overflow: hidden;
+         }
+         .leaflet-top, .leaflet-bottom {
+            z-index: 1001 !important;
          }
          .status-bar {
             position: fixed;
@@ -809,6 +826,10 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          .main-container {
             margin-top: 60px;
             height: calc(100vh - 60px);
+         }
+         .main-container {
+            z-index: 1;
+            position: relative;
          }
       }
       
