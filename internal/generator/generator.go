@@ -769,18 +769,22 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          font-size: 20px;
       }
       
-      @media (max-width: 1024px) {
-         .main-container { flex-direction: column; height: calc(100vh - 60px); }
-         .map-panel { flex: 0 0 45%; border-right: none; border-bottom: 1px solid #222; }
-         .warning-panel { flex: 1; min-height: 0; overflow-y: auto; }
-         .status-bar { flex-wrap: wrap; gap: 10px; justify-content: flex-start; }
-         .status-bar h1 { font-size: 16px; flex-shrink: 1; min-width: 0; }
-         .status-summary { display: flex; flex-wrap: wrap; flex-shrink: 1; }
-         .status-summary > * { flex-shrink: 1; }
-         .status-summary, .status-item, .status-time { flex-shrink: 1; }
-      }
-      
-      @media (min-width: 1025px) {
+      body.header-wrapped .main-container { flex-direction: column; height: calc(100vh - 70px); margin-top: 70px; }
+      body.header-wrapped .map-panel { flex: 0 0 45%; border-right: none; border-bottom: 1px solid #222; }
+      body.header-wrapped .warning-panel { flex: 1; min-height: 0; overflow-y: auto; }
+      body.header-wrapped .status-bar { flex-wrap: wrap; gap: 10px; justify-content: flex-start; }
+      body.header-wrapped .status-bar h1 { font-size: 16px; flex-shrink: 1; min-width: 0; }
+      body.header-wrapped .status-summary { display: flex; flex-wrap: wrap; flex-shrink: 1; }
+      body.header-wrapped .status-summary > * { flex-shrink: 1; }
+      body.header-wrapped .status-summary, body.header-wrapped .status-item, body.header-wrapped .status-time { flex-shrink: 1; }
+      body.header-wrapped .warnings-section { padding-top: 25px; }
+      body.header-wrapped .warning-card:first-of-type { margin-top: 20px; }
+
+      body:not(.header-wrapped) .main-container { flex-direction: row; }
+      body:not(.header-wrapped) .map-panel { flex: 3 1 0%; border-right: 1px solid #222; }
+      body:not(.header-wrapped) .warning-panel { flex: 2 1 0%; }
+
+      @media (min-width: 1701px) {
          .status-bar {
             flex-wrap: wrap;
             gap: 10px;
@@ -826,16 +830,16 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
             right: 0;
             z-index: 1000;
          }
-         .main-container {
-            margin-top: 60px;
-            height: calc(100vh - 60px);
-         }
-         .main-container {
-            z-index: 1;
-            position: relative;
-         }
-      }
-      
+           .main-container {
+              margin-top: 70px;
+              height: calc(100vh - 70px);
+           }
+          .main-container {
+             z-index: 1;
+             position: relative;
+          }
+       }
+       
        @media (max-width: 600px) {
          body { 
             font-size: 14px; 
@@ -911,15 +915,16 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
              display: none;
           }
          
-          .main-container {
-             flex: 1 1 auto;
-             flex-direction: column;
-             min-height: 0;
-             overflow: hidden;
-             display: flex;
-             position: relative;
-             z-index: 1;
-          }
+           .main-container {
+              flex: 1 1 auto;
+              flex-direction: column;
+              min-height: 0;
+              overflow: hidden;
+              display: flex;
+              position: relative;
+              z-index: 1;
+              margin-top: 0;
+           }
           .main-container > * {
              flex: 1 1 auto;
              min-height: 0;
@@ -1184,6 +1189,7 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          console.log('updateStats called with counter:', data.counter);
          if (data.updatedAtUTC) updateLastUpdatedTime(data.updatedAtUTC);
          updateWarningTypeCounts();
+         updateHeaderWrapState();
       }
 
       function updateWarningTypeCounts() {
@@ -1489,7 +1495,26 @@ func GenerateWarningsHTML(warnings []fetcher.Warning, outputPath string) error {
          if (el && timestamp) el.textContent = formatLocalTime(timestamp);
       }
 
+
+      function updateHeaderWrapState() {
+         const statusBar = document.querySelector('.status-bar');
+         const statusSummary = document.querySelector('.status-summary');
+         if (!statusBar || !statusSummary) return;
+         const isMobile = window.innerWidth <= 600;
+         if (isMobile) {
+            document.body.classList.remove('header-wrapped');
+            return;
+         }
+         const statusBarHeight = statusBar.offsetHeight;
+         const statusBarLine = statusBar.offsetTop + statusBarHeight;
+         const summaryLine = statusSummary.offsetTop + statusSummary.offsetHeight;
+         const isWrapped = summaryLine > statusBarLine + 5;
+         document.body.classList.toggle('header-wrapped', isWrapped);
+      }
+
       window.onload = function() {
+         updateHeaderWrapState();
+         window.addEventListener('resize', updateHeaderWrapState);
          initMap();
 
          const initialTimestamp = {{ .UpdatedAtUTC }};
